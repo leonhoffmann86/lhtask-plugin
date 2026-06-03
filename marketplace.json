@@ -1,0 +1,13 @@
+{
+  "name": "lhtask-marketplace",
+  "owner": {
+    "name": "Leon Hoffmann"
+  },
+  "plugins": [
+    {
+      "name": "lhtask",
+      "source": "./",
+      "description": "Autonomous TODO workflow (plan → implement → review) as a portable, config-driven plugin with a bootstrap installer."
+    }
+  ]
+}

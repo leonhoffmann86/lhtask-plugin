@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+#
+# LHTask post-commit hook (enable with: git config core.hooksPath .githooks).
+# Routes the TODO agent chain:
+#   - commit changed TODO.md                 → scripts/lhtask-plan.sh (plan → chain implement)
+#   - commit changed any LHTASK_REVIEW_DIRS/  → scripts/lhtask-review.sh (review, report-only)
+# Also keeps the codegraph index fresh (incremental sync) if codegraph is present.
+#
+# Loop-safe + opt-out:
+#   - AUTOPLAN_AGENT=1 → skip entirely (commits made by the agents themselves).
+#   - .git/autoplan.disabled present → skip entirely (kill switch).
+#
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+
+[ -n "${AUTOPLAN_AGENT:-}" ] && exit 0
+[ -f "$ROOT/.git/autoplan.disabled" ] && exit 0
+git rev-parse HEAD~1 >/dev/null 2>&1 || exit 0
+
+# Load config for the review-dir trigger and codegraph mode.
+LHTASK_REVIEW_DIRS="src tests"
+LHTASK_CODEGRAPH="auto"
+# shellcheck source=/dev/null
+[ -f "$ROOT/lhtask.conf" ] && . "$ROOT/lhtask.conf"
+
+# Keep the code graph fresh so the agents' caller/impact analysis is accurate
+# (cheap incremental sync; never fails the commit).
+if [ "${LHTASK_CODEGRAPH:-auto}" != "off" ]; then
+  command -v codegraph >/dev/null 2>&1 && codegraph sync "$ROOT" >"$ROOT/.git/codegraph-sync.log" 2>&1 || true
+fi
+
+changed="$(git diff --name-only HEAD~1 HEAD 2>/dev/null || true)"
+
+if printf '%s\n' "$changed" | grep -qx 'TODO.md'; then
+  "$ROOT/scripts/lhtask-plan.sh" || true
+fi
+
+# Build "^(dir1|dir2|...)/" from the configured review dirs and trigger review.
+review_re="^(${LHTASK_REVIEW_DIRS// /|})/"
+if printf '%s\n' "$changed" | grep -qE "$review_re"; then
+  "$ROOT/scripts/lhtask-review.sh" || true
+fi
+
+exit 0
