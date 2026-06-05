@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+#
+# pre-push — keep the source-of-truth docs (CLAUDE.md, ARCHITECTURE.md, README.md) in sync
+# with their sources before they leave the machine.
+#
+# "Source" is defined by EXCLUSION (so a new source file can never be forgotten): every
+# tracked file is a source EXCEPT the generated docs themselves and editor/local noise
+# (see DOC_EXCLUDE). Gated: headless claude only runs when a pushed commit changed a source.
+# On change it regenerates the docs, commits them, and PUSHES that commit along itself —
+# so the single `git push` you ran carries the fresh docs. The original push then finds the
+# remote already ahead ("Everything up-to-date") and completes without error.
+#
+# Activate once per clone:  git config core.hooksPath .githooks
+# Levers:
+#   LHTASK_DOCS_SKIP=1            # skip the refresh for one push
+#   .git/docs-refresh.disabled   # kill switch (touch to disable, rm to re-enable)
+#
+set -euo pipefail
+
+# Recursion guard: the doc commit we push ourselves must not re-enter this hook.
+[ -n "${LHTASK_DOCS_PUSH_GUARD:-}" ] && exit 0
+[ -n "${LHTASK_DOCS_SKIP:-}" ] && exit 0
+
+ROOT="$(git rev-parse --show-toplevel)"
+[ -f "$ROOT/.git/docs-refresh.disabled" ] && exit 0
+
+REMOTE="${1:-origin}"
+EMPTY_TREE="4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+# A changed file is a doc SOURCE unless it matches this — i.e. unless it is one of the
+# generated docs or editor/local noise. Anything else (skills/, templates/, .claude-plugin/,
+# scripts/, .githooks/, marketplace.json, the Makefile, and any file added later) counts.
+DOC_EXCLUDE='^CLAUDE\.md$|^ARCHITECTURE\.md$|^README\.md$|^\.gitignore$|^\.vscode/|^\.claude/|(^|/)\.DS_Store$'
+
+# Only the simple, safe case is eligible for auto-regen: pushing the current branch's HEAD.
+BRANCH="$(git symbolic-ref --short -q HEAD || true)"
+[ -n "$BRANCH" ] || exit 0
+HEAD_SHA="$(git rev-parse HEAD)"
+
+# Scan the refs being pushed (stdin: <localref> <localsha> <remoteref> <remotesha>) and decide
+# whether any pushed commit on THIS branch touched the doc sources.
+relevant=0
+while read -r _localref localsha _remoteref remotesha; do
+  [ -n "${localsha:-}" ] || continue
+  case "$localsha" in *[!0]*) ;; *) continue ;; esac          # branch deletion → skip
+  [ "$localsha" = "$HEAD_SHA" ] || continue                   # only the ref matching our HEAD
+  case "$remotesha" in *[!0]*) base="$remotesha" ;; *) base="$EMPTY_TREE" ;; esac
+  # Relevant if ANY changed file is not excluded (i.e. is a source). Capture the
+  # non-excluded lines and test for emptiness — `grep -qv` exit status is unreliable
+  # on BSD/macOS grep (exits 0 on empty input), so don't depend on it.
+  src_changed="$(git diff --name-only "$base" "$localsha" 2>/dev/null | grep -vE "$DOC_EXCLUDE" || true)"
+  if [ -n "$src_changed" ]; then
+    relevant=1
+  fi
+done
+
+[ "$relevant" = 1 ] || exit 0
+
+command -v claude >/dev/null 2>&1 || { echo "pre-push: claude CLI not found — pushing without doc refresh." >&2; exit 0; }
+
+echo "→ Doc sources changed; regenerating CLAUDE.md / ARCHITECTURE.md / README.md (headless claude, ~1–3 min) …"
+"$ROOT/scripts/docs-refresh.sh" || { echo "pre-push: docs-refresh failed — pushing without refresh." >&2; exit 0; }
+
+# Nothing actually changed → let the original push proceed unchanged.
+if git diff --quiet -- CLAUDE.md ARCHITECTURE.md README.md 2>/dev/null; then
+  echo "→ Docs already current."
+  exit 0
+fi
+
+echo "→ Committing refreshed docs and pushing them along …"
+git add CLAUDE.md ARCHITECTURE.md README.md
+LHTASK_DOCS_PUSH_GUARD=1 git commit -q -m "docs: auto-refresh CLAUDE/ARCHITECTURE/README from sources
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+
+# Push the doc commit ourselves (guarded so this hook doesn't recurse). Afterwards the original
+# push of the old tip is a no-op — the remote already contains it as an ancestor.
+if LHTASK_DOCS_PUSH_GUARD=1 git push "$REMOTE" "HEAD:$BRANCH"; then
+  echo "✓ Docs refreshed, committed and pushed on $BRANCH."
+else
+  echo "pre-push: pushing the doc commit failed — it is committed locally; push it manually." >&2
+fi
+
+exit 0
