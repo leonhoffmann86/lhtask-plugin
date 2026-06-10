@@ -12,7 +12,7 @@
       "description": "Autonomous TODO workflow (plan → implement → review) as a portable, config-driven plugin with a bootstrap installer.",
       "license": "MIT",
       "keywords": ["autonomous", "multi-agent", "code-review", "git-hooks", "workflow"],
-      "homepage": "https://github.com/leonhoffmann/lhtask-plugin"
+      "homepage": "https://github.com/leonhoffmann86/lhtask-plugin"
     }
   ]
 }

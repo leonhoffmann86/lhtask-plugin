@@ -25,4 +25,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GIT_DIR-unsetting to prevent quarantine conflicts
 - Configuration via `lhtask.conf` and starter `AGENTS.md` constitution
 
-[0.2.0]: https://github.com/leonhoffmann/lhtask-plugin/releases/tag/v0.2.0
+[0.2.0]: https://github.com/leonhoffmann86/lhtask-plugin/releases/tag/v0.2.0

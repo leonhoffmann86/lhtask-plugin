@@ -8,6 +8,6 @@
   },
   "license": "MIT",
   "keywords": ["autonomous", "multi-agent", "code-review", "git-hooks", "workflow", "ci-cd"],
-  "homepage": "https://github.com/leonhoffmann/lhtask-plugin",
-  "repository": "https://github.com/leonhoffmann/lhtask-plugin"
+  "homepage": "https://github.com/leonhoffmann86/lhtask-plugin",
+  "repository": "https://github.com/leonhoffmann86/lhtask-plugin"
 }
