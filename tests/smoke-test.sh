@@ -105,6 +105,36 @@ echo "--- Unit: lhtask_model_flags resolution ---"
     || { echo "  UNIT FAIL: codegraph off not neutral"; exit 1; }
   LHTASK_CODEGRAPH="auto"
   echo "  ok:  tooling surface reports all tools"
+
+  # conditional tooling lines: curl only with cross-vendor config, notifier only with NOTIFY=1
+  lhtask_tooling_to_md "$PWD" | grep -q "curl" \
+    || { echo "  UNIT FAIL: curl line missing despite cross-vendor config"; exit 1; }
+  LHTASK_MODEL_REVIEWER_CORRECTNESS=""
+  ! lhtask_tooling_to_md "$PWD" | grep -q "curl" \
+    || { echo "  UNIT FAIL: curl line shown without cross-vendor config"; exit 1; }
+  LHTASK_NOTIFY="1"
+  lhtask_tooling_to_md "$PWD" | grep -q "notifier" \
+    || { echo "  UNIT FAIL: notifier line missing with LHTASK_NOTIFY=1"; exit 1; }
+  LHTASK_NOTIFY="0"
+  ! lhtask_tooling_to_md "$PWD" | grep -q "notifier" \
+    || { echo "  UNIT FAIL: notifier line shown with LHTASK_NOTIFY=0"; exit 1; }
+  echo "  ok:  conditional tooling lines (curl / notifier)"
+
+  # gate skip rendering: missing TOOL is ⚠️ with config hint; unconfigured stays neutral
+  cat > gate-fixture.json <<'EOF'
+{"iteration":1,"stack":"node","verdict":"pass","checks":[
+ {"name":"lint","cmd":"eslint .","status":"skip","exit":null,"summary":"tool 'eslint' not on PATH","detail":""},
+ {"name":"build","cmd":"","status":"skip","exit":null,"summary":"no command configured","detail":""},
+ {"name":"fallow","cmd":"fallow audit","status":"skip","exit":null,"summary":"tool 'fallow' not on PATH","detail":""}]}
+EOF
+  GATE_MD="$(lhtask_json_checks_to_md gate-fixture.json)"
+  printf '%s\n' "$GATE_MD" | grep -q "⚠️ gate:lint — tool 'eslint' not on PATH (install it or set LHTASK_GATE_LINT)" \
+    || { echo "  UNIT FAIL: missing-tool skip not rendered as ⚠️"; printf '%s\n' "$GATE_MD"; exit 1; }
+  printf '%s\n' "$GATE_MD" | grep -q -- "- gate:build: skipped (no command configured)" \
+    || { echo "  UNIT FAIL: unconfigured skip not neutral"; printf '%s\n' "$GATE_MD"; exit 1; }
+  printf '%s\n' "$GATE_MD" | grep -q "LHTASK_FALLOW_CMD" \
+    || { echo "  UNIT FAIL: fallow skip hint wrong"; printf '%s\n' "$GATE_MD"; exit 1; }
+  echo "  ok:  gate missing-tool skips rendered as ⚠️ with config hint"
   echo "  model-resolution unit tests passed"
 ) || { echo "SMOKE FAIL: model resolution unit tests"; exit 1; }
 

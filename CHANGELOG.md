@@ -5,6 +5,20 @@ All notable changes to LHTask will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] — 2026-06-10
+
+### Added
+- Tooling visibility now covers EVERY tool the chain touches:
+  - Gate checks skipped because their TOOL IS MISSING render as
+    `⚠️ gate:<name> — tool 'x' not on PATH (install it or set LHTASK_GATE_<NAME>)` —
+    this generically covers all per-stack tools (eslint, tsc, ruff, mypy, pytest,
+    phpcs/phpstan/pest, go, cargo, …); "no command configured" stays a neutral note
+  - `### Tooling` additionally reports `curl` (only when a cross-vendor model is
+    configured — it powers the proxy reachability probe) and the desktop notifier
+    (only when `LHTASK_NOTIFY=1` — previously notifications dropped silently)
+
+[0.7.0]: https://github.com/leonhoffmann86/lhtask-plugin/releases/tag/v0.7.0
+
 ## [0.6.0] — 2026-06-10
 
 ### Added

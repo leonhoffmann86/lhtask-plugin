@@ -217,6 +217,35 @@ lhtask_tooling_to_md() {  # $1 = repo root (default: $ROOT/$LHTASK_ROOT)
   else
     printf '⚠️ timeout: missing — headless phases run without a per-phase timeout (macOS: brew install coreutils)\n'
   fi
+  # curl — proxy reachability probe; only reported when cross-vendor is configured
+  if lhtask_any_xvendor; then
+    if command -v curl >/dev/null 2>&1; then
+      printf '✅ curl: present (cross-vendor proxy probe active)\n'
+    else
+      printf '⚠️ curl: missing — the cross-vendor proxy cannot be probed before a phase (degradations surface only after the run)\n'
+    fi
+  fi
+  # notifier — only reported when notifications are switched on
+  if [ "${LHTASK_NOTIFY:-0}" = "1" ]; then
+    if command -v terminal-notifier >/dev/null 2>&1 || command -v notify-send >/dev/null 2>&1; then
+      printf '✅ notifier: present\n'
+    else
+      printf '⚠️ notifier: LHTASK_NOTIFY=1 but neither terminal-notifier nor notify-send is installed — desktop notifications silently dropped\n'
+    fi
+  fi
+}
+
+# True (0) if ANY configured model (global or per-role/stage) requests a cross-vendor
+# run — used to decide whether proxy-related tooling (curl) is worth reporting.
+lhtask_any_xvendor() {
+  local v
+  for v in "${LHTASK_MODEL:-}" "${LHTASK_MODEL_PLAN:-}" "${LHTASK_MODEL_PLANNER:-}" \
+           "${LHTASK_MODEL_NAVIGATOR:-}" "${LHTASK_MODEL_IMPLEMENTER:-}" \
+           "${LHTASK_MODEL_REVIEWER_CORRECTNESS:-}" "${LHTASK_MODEL_REVIEWER_CONVENTIONS:-}" \
+           "${LHTASK_MODEL_REVIEW:-}"; do
+    case "$v" in openrouter:*) return 0;; esac
+  done
+  return 1
 }
 
 # True (0) if a review sidecar holds parseable JSON with a recognizable verdict —
@@ -428,12 +457,18 @@ lhtask_gate_summary() {
   fi
 }
 
-# gate.json → ✅/❌/skip markdown lines (for TODO.review.md).
+# gate.json → ✅/❌/⚠️/skip markdown lines (for TODO.review.md). A check skipped
+# because its TOOL IS MISSING is ⚠️ (visible degradation — install it or configure
+# LHTASK_GATE_*); a check with no command configured stays a neutral note.
 lhtask_json_checks_to_md() {
   local f="$1"
   [ -s "$f" ] || { printf -- '- gate result unavailable\n'; return; }
   if command -v jq >/dev/null 2>&1 && jq -e . "$f" >/dev/null 2>&1; then
-    jq -r '.checks[]? | if .status=="pass" then "✅ gate:\(.name)" elif .status=="fail" then "❌ gate:\(.name) — \(.summary // "fail")" else "- gate:\(.name): skipped" end' "$f"
+    jq -r '.checks[]?
+      | if .status=="pass" then "✅ gate:\(.name)"
+        elif .status=="fail" then "❌ gate:\(.name) — \(.summary // "fail")"
+        elif ((.summary // "") | test("not on PATH")) then "⚠️ gate:\(.name) — \(.summary) (install it or set \(if .name=="fallow" then "LHTASK_FALLOW_CMD" else "LHTASK_GATE_\(.name|ascii_upcase)" end))"
+        else "- gate:\(.name): skipped (\(.summary // "no command configured"))" end' "$f"
   elif grep -Eq '"verdict"[[:space:]]*:[[:space:]]*"fail"' "$f"; then
     printf '❌ gate: one or more checks failed (see gate.json)\n'
   else
