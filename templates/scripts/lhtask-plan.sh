@@ -21,8 +21,9 @@ cd "$ROOT"
 # shellcheck source=scripts/lhtask-lib.sh
 . "$ROOT/scripts/lhtask-lib.sh"
 lhtask_load_config
-# Degradations of a cross-vendor plan model land here; surfaced by the next review run.
-LHTASK_MODEL_FALLBACK_LOG="$ROOT/.git/lhtask-model-fallbacks.log"
+# Degradations of a cross-vendor plan model land here; consumed by the sourced lib
+# (lhtask_model_fallback_note) and by the chained implement stage — hence exported.
+export LHTASK_MODEL_FALLBACK_LOG="$ROOT/.git/lhtask-model-fallbacks.log"
 lhtask_model_flags plan    # stage-level override: LHTASK_MODEL_PLAN (cross-vendor capable)
 
 # First commit has no parent → nothing to diff against.
