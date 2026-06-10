@@ -31,6 +31,21 @@ For `LHTASK_REVIEW_DIRS`, detect the top-level source + test dirs that exist
 list the constitution files that exist or will be created (default `AGENTS.md`; add
 `CLAUDE.md` and any frontend guide if present).
 
+Also pick the **deterministic-gate** values (used by the implement loop's `lhtask-gate.sh`):
+
+| Marker file        | `LHTASK_STACK` | Gate commands (lint / typecheck / test / build) |
+| ------------------ | -------------- | ----------------------------------------------- |
+| `next.config.*`    | `nextjs` | `npm run -s lint` / `npx -y tsc --noEmit` / `npm test --silent` / `npm run -s build` |
+| `package.json` + react | `react` | `npm run -s lint` / `npx -y tsc --noEmit` / `npm test --silent` / (none) |
+| `pyproject.toml` / `setup.py` | `python` | `ruff check {path}` / `mypy {path}` / `pytest {path} -q` / (none) |
+| `composer.json`    | `php`  | `vendor/bin/phpcs {path}` / `vendor/bin/phpstan analyse {path}` / `vendor/bin/pest` / (none) |
+| `go.mod`           | `go`   | `gofmt -l .` / (none) / `go test ./...` / (none) |
+| `Cargo.toml`       | `rust` | `cargo clippy -- -D warnings` / (none) / `cargo test` / `cargo build` |
+
+You may leave `LHTASK_STACK="auto"` and the `LHTASK_GATE_*` empty — `lhtask-gate.sh` then
+auto-detects the stack and uses the same built-in defaults at runtime. Set them explicitly only
+to override. Each gate command is skipped (not failed) if its tool isn't on PATH.
+
 **Confirm the proposed values with the user** via `AskUserQuestion` whenever the project
 type is ambiguous (e.g. multiple lockfiles, monorepo, no obvious test command). Otherwise
 state the detected defaults and proceed.
@@ -44,7 +59,20 @@ cp -n "$TPL/scripts/lhtask-lib.sh"      "$ROOT/scripts/lhtask-lib.sh"
 cp -n "$TPL/scripts/lhtask-plan.sh"     "$ROOT/scripts/lhtask-plan.sh"
 cp -n "$TPL/scripts/lhtask-implement.sh" "$ROOT/scripts/lhtask-implement.sh"
 cp -n "$TPL/scripts/lhtask-review.sh"   "$ROOT/scripts/lhtask-review.sh"
+cp -n "$TPL/scripts/lhtask-gate.sh"     "$ROOT/scripts/lhtask-gate.sh"
 chmod +x "$ROOT/.githooks/post-commit" "$ROOT"/scripts/lhtask-*.sh
+
+# Subagent team (vendored copy — the headless loop reads these via --append-system-prompt;
+# the plugin also ships the same agents/ so interactive sessions get them and they auto-update).
+mkdir -p "$ROOT/.claude/agents"
+for a in planner navigator implementer reviewer-correctness reviewer-conventions reviewer-visual; do
+  cp -n "$TPL/.claude/agents/$a.md" "$ROOT/.claude/agents/$a.md"
+done
+
+# codegraph MCP config (used as the headless navigator's --mcp-config fallback). MERGE,
+# don't clobber: if $ROOT/.mcp.json already exists, add the "codegraph" server into its
+# mcpServers (keep the user's other servers) rather than overwriting.
+cp -n "$TPL/.mcp.json" "$ROOT/.mcp.json"
 ```
 `cp -n` never overwrites. If a target already exists and differs, tell the user and ask
 before replacing (show a diff).
@@ -52,7 +80,9 @@ before replacing (show a diff).
 ## 3. Write `lhtask.conf` with the confirmed values
 If `$ROOT/lhtask.conf` exists, do **not** overwrite — show what differs and let the user decide.
 Otherwise start from `$TPL/lhtask.conf` and substitute the detected values for
-`LHTASK_REVIEW_DIRS`, `LHTASK_TEST_CMD`, `LHTASK_CONSTITUTION_FILES`, `LHTASK_VENV`.
+`LHTASK_REVIEW_DIRS`, `LHTASK_TEST_CMD`, `LHTASK_CONSTITUTION_FILES`, `LHTASK_VENV`, and the
+gate block (`LHTASK_STACK` + any explicit `LHTASK_GATE_*` overrides from step 1; leave empty to
+auto-detect). `LHTASK_MAX_ITER`/`LHTASK_PHASE_TIMEOUT` defaults are usually fine.
 
 ## 4. Seed the lifecycle + constitution files (only if missing)
 For each of `TODO.md`, `DONE.md`, `AGENT_LOG.md`, `AGENTS.md`: copy from `$TPL/` **only if the
@@ -61,25 +91,47 @@ user's conventions win.
 
 ## 5. Update `.gitignore`
 Append (if not already present): `TODO.autoplan.md`, `TODO.review.md`, `TODO.run.log` (the
-human-visible consolidated run log). The `.git/lhtask-*.log` and lock files live under `.git/`
-and are never tracked. Don't duplicate existing entries.
+human-visible consolidated run log), and `.lhtask-state/` (the per-run role sidecars; also
+excluded inside the worktree, but ignore it in the main repo too). The `.git/lhtask-*.log` and
+lock files live under `.git/` and are never tracked. Don't duplicate existing entries.
 
 ## 6. Activate the hooks
 ```bash
 git -C "$ROOT" config core.hooksPath .githooks
 ```
 
-## 7. Minimal Claude settings (clean, no absolute paths)
+## 7. Minimal Claude settings (allowlist + hard deny rules, no absolute paths)
 If `$ROOT/.claude/settings.json` is missing, create one with a small allowlist that lets the
 chain run without prompts — and **no machine-specific absolute paths**. Suggested allow entries:
 `Bash(claude --version)`, `Bash(git *)`, `Bash(codegraph *)`, plus the project's test runner
-(e.g. `Bash(.venv/bin/python -m pytest *)` or `Bash(npm test*)`). If the file exists, **merge**
-the allowlist rather than overwriting, and never copy entries containing absolute home paths.
+(e.g. `Bash(.venv/bin/python -m pytest *)` or `Bash(npm test*)`).
+
+**Also add a `permissions.deny` block** (defense-in-depth — the implement loop already passes the
+same denies via `--settings`, but committing them makes every clone inherit them; deny is evaluated
+first and cannot be re-allowed by any layer):
+
+```json
+{
+  "permissions": {
+    "allow": ["Bash(git *)", "Bash(claude --version)", "Bash(codegraph *)"],
+    "deny": ["Bash(git push *)", "Bash(git reset --hard *)", "Bash(git rebase *)", "Bash(rm -rf *)"]
+  }
+}
+```
+
+If the file exists, **merge** allow + deny rather than overwriting, and never copy entries
+containing absolute home paths.
 
 ## 8. Summarize and hand off
 Print what was created/skipped, the final `lhtask.conf` values, and the next steps:
 - Capture work with `/lhtask:lh-task "<idea>"`.
-- Commit `TODO.md` to start the chain (implementation lands on the impl branch, never auto-merged).
+- Commit `TODO.md` to start the chain. The implement stage runs a subagent team
+  (planner → navigator → implementer → deterministic gate → reviewers, bounded by
+  `LHTASK_MAX_ITER`) in an isolated worktree on the impl branch. **Never auto-merged** — and it
+  now carries up to `LHTASK_MAX_ITER` unmerged commits, so review and merge/discard the branch
+  promptly (`git log <impl-branch>`).
 - Kill switch: `touch .git/autoplan.disabled`. Debug a stage: `LHTASK_FOREGROUND=1 .githooks/post-commit`.
-- Remind the user this needs the `claude` CLI on PATH, and (optionally) the `codegraph` CLI/MCP
-  for caller/impact analysis — it degrades gracefully to Grep/Glob without it.
+- Needs the `claude` CLI on PATH; `codegraph` CLI/MCP is optional (gate + reviewers degrade
+  gracefully to Grep/Glob without it). Per-stack gate tools (eslint/tsc, ruff/mypy/pytest,
+  phpcs/phpstan/pest) are skipped — not failed — when absent.
+- Refresh the chain later (after a plugin update) with `/lhtask:update`.

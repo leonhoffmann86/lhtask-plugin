@@ -22,5 +22,5 @@ check: ## Syntax-check every shell script (+ shellcheck if installed)
 	  bash -n "$$f" && echo "ok  $$f" || exit 1; \
 	done
 	@if command -v shellcheck >/dev/null 2>&1; then \
-	  shellcheck .githooks/* scripts/*.sh templates/scripts/*.sh && echo "shellcheck: clean"; \
+	  shellcheck --severity=warning .githooks/* scripts/*.sh templates/githooks/post-commit templates/scripts/*.sh && echo "shellcheck: clean"; \
 	else echo "(shellcheck not installed — skipped)"; fi

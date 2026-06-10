@@ -13,6 +13,7 @@
 LHTASK_ROOT="$(git rev-parse --show-toplevel)"
 
 # Config defaults, then override from the repo's lhtask.conf if present.
+# shellcheck disable=SC2034  # these knobs are consumed by the sourcing stage scripts.
 lhtask_load_config() {
   LHTASK_REVIEW_DIRS="src tests"
   LHTASK_TEST_CMD="echo 'no test command configured' && false"
@@ -23,6 +24,16 @@ lhtask_load_config() {
   LHTASK_MODEL=""
   LHTASK_REVIEW_AUTONOMOUS="1"
   LHTASK_NOTIFY="0"
+  # --- Subagent-team + deterministic-gate block (kept in sync with lhtask.conf) ---
+  LHTASK_STACK="auto"            # auto | nextjs | react | node | python | php | go | rust
+  LHTASK_GATE_LINT=""            # empty → resolved from the detected stack (or skipped)
+  LHTASK_GATE_TYPECHECK=""
+  LHTASK_GATE_TEST=""            # empty → falls back to LHTASK_TEST_CMD
+  LHTASK_GATE_BUILD=""
+  LHTASK_MAX_ITER="3"            # bounded implement↔gate↔review loop (convergence guarantee)
+  LHTASK_PHASE_TIMEOUT="600"     # per-phase `claude -p` timeout in seconds (bounds lock hold)
+  LHTASK_VISUAL_MAX_DIFF_RATIO="0.02"   # stage 2 (visual reviewer)
+  LHTASK_DEV_URL="http://localhost:3000"  # stage 2 (visual reviewer)
   # shellcheck source=/dev/null
   [ -f "$LHTASK_ROOT/lhtask.conf" ] && . "$LHTASK_ROOT/lhtask.conf"
   return 0
@@ -78,6 +89,7 @@ lhtask_should_skip() {
 
 # Build a model flag array for headless claude calls (empty if no override).
 # Usage: lhtask_model_flags; claude -p ... "${LHTASK_MODEL_FLAGS[@]}"
+# shellcheck disable=SC2034  # LHTASK_MODEL_FLAGS is consumed by the caller.
 lhtask_model_flags() {
   LHTASK_MODEL_FLAGS=()
   [ -n "${LHTASK_MODEL:-}" ] && LHTASK_MODEL_FLAGS=(--model "$LHTASK_MODEL")
@@ -97,4 +109,224 @@ lhtask_runlog_stage() {  # $1 = path, $2 = stage label
 }
 lhtask_runlog_note() {   # $1 = path, $2 = message
   printf '— %s\n' "$2" >> "$1"
+}
+
+# ============================================================================
+# Subagent-team + deterministic-gate helpers (used by lhtask-implement.sh and
+# lhtask-gate.sh). All degrade gracefully: missing tools → skip, not crash.
+# ============================================================================
+
+# Detect the project stack from marker files in $1 (default cwd).
+lhtask_detect_stack() {
+  local d="${1:-.}"
+  if [ -f "$d/next.config.js" ] || [ -f "$d/next.config.mjs" ] || [ -f "$d/next.config.ts" ]; then echo nextjs; return; fi
+  if [ -f "$d/package.json" ]; then
+    if grep -q '"react"' "$d/package.json" 2>/dev/null; then echo react; else echo node; fi; return
+  fi
+  if [ -f "$d/pyproject.toml" ] || [ -f "$d/setup.py" ] || [ -f "$d/setup.cfg" ]; then echo python; return; fi
+  if [ -f "$d/composer.json" ]; then echo php; return; fi
+  if [ -f "$d/go.mod" ]; then echo go; return; fi
+  if [ -f "$d/Cargo.toml" ]; then echo rust; return; fi
+  echo unknown
+}
+
+# Resolve a gate command for a check (lint|typecheck|test|build). Echoes a command
+# template (may contain the {path} placeholder) or empty (→ the gate skips it).
+# Priority: explicit LHTASK_GATE_<CHECK> → (test only) legacy LHTASK_TEST_CMD →
+# built-in per-stack default. LHTASK_STACK=auto → detect from marker files.
+lhtask_gate_cmd() {
+  local check="$1" stack explicit
+  case "$check" in
+    lint)      explicit="${LHTASK_GATE_LINT:-}";;
+    typecheck) explicit="${LHTASK_GATE_TYPECHECK:-}";;
+    test)      explicit="${LHTASK_GATE_TEST:-}";;
+    build)     explicit="${LHTASK_GATE_BUILD:-}";;
+    *) return 0;;
+  esac
+  if [ -n "$explicit" ]; then printf '%s' "$explicit"; return 0; fi
+  if [ "$check" = test ] && [ -n "${LHTASK_TEST_CMD:-}" ] \
+     && [ "$LHTASK_TEST_CMD" != "echo 'no test command configured' && false" ]; then
+    printf '%s' "$LHTASK_TEST_CMD"; return 0
+  fi
+  stack="${LHTASK_STACK:-auto}"; [ "$stack" = auto ] && stack="$(lhtask_detect_stack)"
+  case "${stack}:${check}" in
+    nextjs:lint)      printf '%s' 'npm run -s lint';;
+    nextjs:typecheck) printf '%s' 'npx -y tsc --noEmit';;
+    nextjs:test)      printf '%s' 'npm test --silent';;
+    nextjs:build)     printf '%s' 'npm run -s build';;
+    react:lint)       printf '%s' 'npm run -s lint';;
+    react:typecheck)  printf '%s' 'npx -y tsc --noEmit';;
+    react:test)       printf '%s' 'npm test --silent';;
+    node:lint)        printf '%s' 'npm run -s lint';;
+    node:test)        printf '%s' 'npm test --silent';;
+    python:lint)      printf '%s' 'ruff check {path}';;
+    python:typecheck) printf '%s' 'mypy {path}';;
+    python:test)      printf '%s' 'pytest {path} -q';;
+    php:lint)         printf '%s' 'vendor/bin/phpcs {path}';;
+    php:typecheck)    printf '%s' 'vendor/bin/phpstan analyse {path}';;
+    php:test)         printf '%s' 'vendor/bin/pest';;
+    go:lint)          printf '%s' 'gofmt -l .';;
+    go:test)          printf '%s' 'go test ./...';;
+    rust:lint)        printf '%s' 'cargo clippy -- -D warnings';;
+    rust:test)        printf '%s' 'cargo test';;
+    rust:build)       printf '%s' 'cargo build';;
+    *) return 0;;   # no built-in for this (stack,check) → skip
+  esac
+}
+
+# Build an --mcp-config flag array for headless claude (empty if no vendored config
+# or codegraph disabled). Usage: lhtask_mcp_flags; claude … "${LHTASK_MCP_FLAGS[@]}"
+# shellcheck disable=SC2034  # LHTASK_MCP_FLAGS is consumed by the caller.
+lhtask_mcp_flags() {
+  LHTASK_MCP_FLAGS=()
+  if [ "${LHTASK_CODEGRAPH:-auto}" != off ] && [ -f "$LHTASK_ROOT/.mcp.json" ]; then
+    LHTASK_MCP_FLAGS=(--mcp-config "$LHTASK_ROOT/.mcp.json")
+  fi
+  return 0
+}
+
+# Build a timeout prefix array for each headless phase (empty if no timeout tool —
+# graceful no-op). macOS ships no `timeout`; use `gtimeout` (coreutils) if present.
+# Usage: lhtask_timeout_cmd; "${LHTASK_TIMEOUT[@]}" claude …
+# shellcheck disable=SC2034  # LHTASK_TIMEOUT is consumed by the caller.
+lhtask_timeout_cmd() {
+  LHTASK_TIMEOUT=()
+  local t="${LHTASK_PHASE_TIMEOUT:-600}"
+  if   command -v timeout  >/dev/null 2>&1; then LHTASK_TIMEOUT=(timeout "$t")
+  elif command -v gtimeout >/dev/null 2>&1; then LHTASK_TIMEOUT=(gtimeout "$t")
+  fi
+  return 0
+}
+
+# Hard deny-rules for every headless role, as a --settings JSON string. Deny is
+# evaluated first (deny→ask→allow) and cannot be re-allowed by any layer — so this
+# blocks destructive/remote git + rm -rf + spontaneous Agent/Task spawns regardless
+# of the per-role --allowed-tools or permission-mode.
+lhtask_deny_settings() {
+  printf '%s' '{"permissions":{"deny":["Bash(git push *)","Bash(git reset --hard *)","Bash(git rebase *)","Bash(rm -rf *)","Task","Agent"]}}'
+}
+
+# Print an agent .md body WITHOUT its YAML frontmatter (the header is config for
+# interactive subagent loading; headless --append-system-prompt must not see it as
+# literal noise). Files without frontmatter are printed verbatim.
+lhtask_agent_body() {
+  local f="$1"
+  [ -f "$f" ] || return 0
+  awk 'NR==1 && $0 !~ /^---[[:space:]]*$/ {plain=1} plain{print; next} /^---[[:space:]]*$/{c++; next} c>=2{print}' "$f"
+}
+
+# Highest severity across one or more EXPECTED review json files. FAIL-CLOSED:
+# a missing/empty/unparseable/unrecognizable decision sidecar returns "blocker"
+# (→ loopback, never a silent DONE). Echoes: blocker|major|minor|none.
+lhtask_review_max_severity() {
+  local max=0 rank f
+  for f in "$@"; do
+    if [ ! -s "$f" ]; then echo blocker; return; fi
+    if command -v jq >/dev/null 2>&1 && ! jq -e . "$f" >/dev/null 2>&1; then echo blocker; return; fi
+    if   grep -Eq '"severity"[[:space:]]*:[[:space:]]*"blocker"' "$f"; then rank=3
+    elif grep -Eq '"severity"[[:space:]]*:[[:space:]]*"major"'   "$f"; then rank=2
+    elif grep -Eq '"severity"[[:space:]]*:[[:space:]]*"minor"'   "$f"; then rank=1
+    elif grep -Eq '"verdict"[[:space:]]*:[[:space:]]*"pass"'     "$f"; then rank=0
+    else echo blocker; return; fi
+    [ "$rank" -gt "$max" ] && max="$rank"
+  done
+  case "$max" in 3) echo blocker;; 2) echo major;; 1) echo minor;; *) echo none;; esac
+}
+
+# One-line human summary of a gate.json (failing check names).
+lhtask_gate_summary() {
+  local f="$1"
+  [ -s "$f" ] || { printf 'gate result unavailable'; return; }
+  if command -v jq >/dev/null 2>&1 && jq -e . "$f" >/dev/null 2>&1; then
+    jq -r '[.checks[]?|select(.status=="fail")|.name] | if length>0 then "failed: "+join(", ") else "all checks passed/skipped" end' "$f"
+  else
+    if grep -Eq '"verdict"[[:space:]]*:[[:space:]]*"fail"' "$f"; then printf 'one or more checks failed (see gate.json)'; else printf 'all checks passed/skipped'; fi
+  fi
+}
+
+# gate.json → ✅/❌/skip markdown lines (for TODO.review.md).
+lhtask_json_checks_to_md() {
+  local f="$1"
+  [ -s "$f" ] || { printf -- '- gate result unavailable\n'; return; }
+  if command -v jq >/dev/null 2>&1 && jq -e . "$f" >/dev/null 2>&1; then
+    jq -r '.checks[]? | if .status=="pass" then "✅ gate:\(.name)" elif .status=="fail" then "❌ gate:\(.name) — \(.summary // "fail")" else "- gate:\(.name): skipped" end' "$f"
+  elif grep -Eq '"verdict"[[:space:]]*:[[:space:]]*"fail"' "$f"; then
+    printf '❌ gate: one or more checks failed (see gate.json)\n'
+  else
+    printf '✅ gate: all checks passed/skipped\n'
+  fi
+}
+
+# review-<name>.json → ✅/⚠️/❌ markdown lines. Missing/unparseable → ❌ (fail-closed).
+lhtask_json_findings_to_md() {
+  local f="$1" agent
+  agent="$(basename "$f" .json)"
+  [ -s "$f" ] || { printf '❌ %s: report missing (treated as blocker)\n' "$agent"; return; }
+  if command -v jq >/dev/null 2>&1; then
+    if ! jq -e . "$f" >/dev/null 2>&1; then printf '❌ %s: unparseable report (treated as blocker)\n' "$agent"; return; fi
+    jq -r --arg a "$agent" '(.agent // $a) as $n
+      | if ((.findings|length)==0) and (.verdict=="pass") then "✅ \($n): ok"
+        else (.findings[]? | (if (.severity=="blocker" or .severity=="major") then "❌ " elif .severity=="minor" then "⚠️ " else "⚠️ " end) + "\($n):\(.loc // "?") — \(.problem // "")") end' "$f"
+  elif grep -Eq '"severity"[[:space:]]*:[[:space:]]*"(blocker|major)"' "$f"; then
+    printf '❌ %s: blocker/major findings (see review json)\n' "$agent"
+  elif grep -Eq '"severity"[[:space:]]*:[[:space:]]*"minor"' "$f"; then
+    printf '⚠️ %s: minor findings\n' "$agent"
+  elif grep -Eq '"verdict"[[:space:]]*:[[:space:]]*"pass"' "$f"; then
+    printf '✅ %s: ok\n' "$agent"
+  else
+    printf '❌ %s: no recognizable verdict (treated as blocker)\n' "$agent"
+  fi
+}
+
+# Surface review results: traffic-light summary line, ❌-loopback pointer into
+# TODO.md under "## 🔎 Review-Findings", AGENT_LOG entry, optional notification.
+# Reads $ROOT/TODO.review.md; uses $SHA for labels. (Moved here from lhtask-review.sh
+# so the implement loop can reuse the exact same surface.)
+lhtask_surface_review() {
+  local root="${ROOT:-$LHTASK_ROOT}" sha="${SHA:-}"
+  local report="$root/TODO.review.md"
+  [ -f "$report" ] || return 0
+  local ok warn bad
+  ok="$(grep -c '✅' "$report" 2>/dev/null || true)";  ok="${ok:-0}"
+  warn="$(grep -c '⚠️' "$report" 2>/dev/null || true)"; warn="${warn:-0}"
+  bad="$(grep -c '❌' "$report" 2>/dev/null || true)";  bad="${bad:-0}"
+  local line="LHTask review ${sha}: ✅ ${ok}  ⚠️ ${warn}  ❌ ${bad} — see TODO.review.md"
+  echo "$line"
+
+  if [ "$bad" -gt 0 ] 2>/dev/null; then
+    local todo="$root/TODO.md"
+    [ -f "$todo" ] || return 0
+    awk 'BEGIN{s=0} /^## 🔎 Review-Findings/{s=1} s&&/^## /&&!/^## 🔎 Review-Findings/{s=0} !s{print}' "$todo" > "$todo.tmp" || cp "$todo" "$todo.tmp"
+    {
+      cat "$todo.tmp"
+      printf '\n## 🔎 Review-Findings\n'
+      printf -- '- ⚠️ %s — review of %s flagged %s ❌ finding(s). See TODO.review.md; resolve or re-file as a TODO.\n' \
+        "$(date '+%Y-%m-%d %H:%M')" "$sha" "$bad"
+    } > "$todo"
+    rm -f "$todo.tmp"
+    [ -f "$root/AGENT_LOG.md" ] && printf '\n## [%s] LHTask review %s — %s ❌, %s ⚠️ (see TODO.review.md)\n' \
+      "$(date '+%Y-%m-%d %H:%M')" "$sha" "$bad" "$warn" >> "$root/AGENT_LOG.md"
+  fi
+
+  if [ "${LHTASK_NOTIFY:-0}" = "1" ]; then
+    if command -v terminal-notifier >/dev/null 2>&1; then
+      terminal-notifier -title "LHTask review ${sha}" -message "$line" 2>/dev/null || true
+    elif command -v notify-send >/dev/null 2>&1; then
+      notify-send "LHTask review ${sha}" "$line" 2>/dev/null || true
+    fi
+  fi
+}
+
+# Build TODO.review.md from the structured artifacts (gate + reviews), then hand off
+# to lhtask_surface_review for the ## 🔎 / AGENT_LOG / notify surface (verbatim).
+lhtask_findings_surface() {  # $1 = gate.json ; $2.. = review-*.json files
+  local root="${ROOT:-$LHTASK_ROOT}" gate="$1" f; shift
+  {
+    printf '> Review of %s — %s\n\n' "${SHA:-autoplan/impl}" "$(date '+%Y-%m-%d %H:%M')"
+    printf '### Gate\n'
+    lhtask_json_checks_to_md "$gate"
+    printf '\n### Reviews\n'
+    for f in "$@"; do lhtask_json_findings_to_md "$f"; done
+  } > "$root/TODO.review.md"
+  lhtask_surface_review
 }

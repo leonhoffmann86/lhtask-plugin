@@ -54,10 +54,20 @@ Constitution for autonomous and assisted agents in this repo. The LHTask chain
 ## Definition of Done (for an autonomously implemented item)
 
 - Smallest change that fully solves the item.
-- The narrowest effective test selection is green (see `LHTASK_TEST_CMD` in `lhtask.conf`).
-- An `AGENT_LOG.md` entry (what, why, which tests are green).
+- The **deterministic gate is green**: every configured check (lint / typecheck / test / build —
+  see the `LHTASK_GATE_*` / `LHTASK_STACK` keys, or the legacy `LHTASK_TEST_CMD`) passed or was
+  skipped because its tool is absent. A red gate loops back to the implementer, never ships.
+- No `blocker`/`major` reviewer findings remain (correctness + conventions reviewers).
+- An `AGENT_LOG.md` entry (what, why, which checks are green).
 - The item moved from `TODO.md` to `DONE.md` (with date + impl-branch ref).
 - No secrets in code or logs.
+
+## Merge discipline (read this)
+
+The implement stage runs a bounded loop and may produce **several unmerged commits per run** on the
+impl branch (`LHTASK_IMPL_BRANCH`), in a throwaway worktree that is **hard-reset each run**. Nothing
+is ever auto-merged. Review (`git log <impl-branch>`) and **merge or discard promptly** — an
+abandoned impl branch will be overwritten by the next run.
 
 ## Handoffs
 

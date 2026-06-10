@@ -75,45 +75,8 @@ printf '> ⏳ Review of %s running since %s … report appears here when done.\n
   "$SHA" "$(date '+%H:%M:%S')" > "$ROOT/TODO.review.md"
 echo "→ LHTask review started (${SHA}); report in TODO.review.md (~1–2 min)."
 
-# Surface review results: traffic-light summary, ❌ loopback into TODO.md, AGENT_LOG.
-lhtask_surface_review() {
-  local report="$ROOT/TODO.review.md"
-  [ -f "$report" ] || return 0
-  local ok warn bad
-  # grep -c already prints a count (0 on no match); just swallow its exit code.
-  ok="$(grep -c '✅' "$report" 2>/dev/null || true)";  ok="${ok:-0}"
-  warn="$(grep -c '⚠️' "$report" 2>/dev/null || true)"; warn="${warn:-0}"
-  bad="$(grep -c '❌' "$report" 2>/dev/null || true)";  bad="${bad:-0}"
-  local line="LHTask review ${SHA}: ✅ ${ok}  ⚠️ ${warn}  ❌ ${bad} — see TODO.review.md"
-  echo "$line"
-
-  if [ "$bad" -gt 0 ] 2>/dev/null; then
-    # Append a human-owned pointer under a 🔎 section (skip convention ignores 🚧,
-    # not 🔎 — but plan/implement only act on plain active items, so a 🔎 heading
-    # is a visible note, not a task). Replace any prior LHTask-managed block.
-    local todo="$ROOT/TODO.md"
-    [ -f "$todo" ] || return 0
-    awk 'BEGIN{s=0} /^## 🔎 Review-Findings/{s=1} s&&/^## /&&!/^## 🔎 Review-Findings/{s=0} !s{print}' "$todo" > "$todo.tmp" || cp "$todo" "$todo.tmp"
-    {
-      cat "$todo.tmp"
-      printf '\n## 🔎 Review-Findings\n'
-      printf -- '- ⚠️ %s — review of %s flagged %s ❌ finding(s). See TODO.review.md; resolve or re-file as a TODO.\n' \
-        "$(date '+%Y-%m-%d %H:%M')" "$SHA" "$bad"
-    } > "$todo"
-    rm -f "$todo.tmp"
-    [ -f "$ROOT/AGENT_LOG.md" ] && printf '\n## [%s] LHTask review %s — %s ❌, %s ⚠️ (see TODO.review.md)\n' \
-      "$(date '+%Y-%m-%d %H:%M')" "$SHA" "$bad" "$warn" >> "$ROOT/AGENT_LOG.md"
-  fi
-
-  # Optional desktop notification.
-  if [ "${LHTASK_NOTIFY:-0}" = "1" ]; then
-    if command -v terminal-notifier >/dev/null 2>&1; then
-      terminal-notifier -title "LHTask review ${SHA}" -message "$line" 2>/dev/null || true
-    elif command -v notify-send >/dev/null 2>&1; then
-      notify-send "LHTask review ${SHA}" "$line" 2>/dev/null || true
-    fi
-  fi
-}
+# lhtask_surface_review now lives in lhtask-lib.sh (shared with lhtask-implement.sh).
+# It reads $ROOT/TODO.review.md and uses $SHA — both set above — so behaviour is unchanged.
 
 do_run() {
   trap 'rmdir "$LOCKDIR" 2>/dev/null || true' EXIT

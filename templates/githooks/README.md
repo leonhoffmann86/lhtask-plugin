@@ -21,17 +21,29 @@ Shared helpers: `scripts/lhtask-lib.sh`. Config: `lhtask.conf` (single source of
 ### What the implementer does (stage 2)
 
 Works in an **isolated git worktree** on the impl branch (never your working tree,
-never auto-merged). For each active, not-yet-done TODO item:
+never auto-merged) and runs a **subagent team** in a bounded loop (`lhtask-implement.sh`),
+each role its own headless `claude -p`:
 
-- **High-risk** (per `AGENTS.md`) → **not implemented**; moved under `## 🚧 Deferred` for a human.
-- otherwise → smallest change; the configured test command must be **green**; then one
-  commit per item with the code **+** the item moved `TODO.md` → `DONE.md` **+** an `AGENT_LOG.md` entry.
+1. **planner** → classifies risk (high-risk → `## 🚧 Deferred`, never implemented) and writes a
+   bounded plan with verifiable acceptance criteria.
+2. **navigator** → finds the existing patterns/conventions + blast radius (codegraph if present).
+3. loop, up to `LHTASK_MAX_ITER` times:
+   - **implementer** → smallest change; one commit per item (code **+** `TODO.md`→`DONE.md` **+**
+     `AGENT_LOG.md`). It can commit but **cannot** push / `git reset --hard` / `rm -rf` (denied).
+   - **deterministic gate** (`lhtask-gate.sh`, pure shell, no LLM) → runs the stack's
+     lint / typecheck / test / build (`LHTASK_GATE_*` / `LHTASK_STACK`). A missing tool is skipped,
+     not failed. **Red → loop back** to the implementer with the failures as the fix list.
+   - **reviewers** (read-only) → correctness + conventions. `blocker`/`major` findings → loop back.
+   - all green + no blocker/major → **DONE**.
+4. loop exhausted without converging → escalated to `## 🔎 Review-Findings` (+ `AGENT_LOG`); the
+   partial work stays on the impl branch for you.
 
-After the batch, the **review stage runs against the impl branch** (`LHTASK_REVIEW_AUTONOMOUS=1`),
-so the autonomous work always gets a report — the post-commit hook can't do this itself
-because agent commits carry `AUTOPLAN_AGENT=1`.
+A traffic-light report is written to `TODO.review.md` either way (the in-loop reviewers replace the
+old terminal review call; `LHTASK_REVIEW_AUTONOMOUS=0` turns the reviewer phase off, leaving a
+gate-only loop).
 
-You review the branch (`git log <impl-branch>`) and merge or discard.
+You review the branch (`git log <impl-branch>`) and **merge or discard promptly** — it is hard-reset
+on the next run and may carry several unmerged commits.
 
 ### TODO lifecycle & the skip lever
 
