@@ -251,7 +251,7 @@ sequenceDiagram
         end
     end
     Note right of C: jede Rolle läuft mit<br/>AUTOPLAN_AGENT=1 +<br/>Timeout (LHTASK_PHASE_TIMEOUT)<br/>+ eigenem Modell (LHTASK_MODEL_&lt;ROLLE&gt;<br/>→ LHTASK_MODEL → CLI-Default;<br/>openrouter:-Prefix → Proxy-Env pro Prozess)
-    I->>I: lhtask_findings_surface: TODO.review.md (Ampel)<br/>+ ❌→🔎 in TODO.md + AGENT_LOG
+    I->>I: lhtask_findings_surface: TODO.review.md (Ampel:<br/>Gate · Fallow · Model fallbacks · Reviews · Tooling)<br/>+ ❌→🔎 in TODO.md + AGENT_LOG
     I->>I: worktree entfernen (Branch bleibt!)<br/>nicht konvergiert → Eskalations-Note
     deactivate I
     I-->>U: "✅ x ⚠️ y ❌ z — siehe TODO.review.md"
@@ -261,7 +261,8 @@ sequenceDiagram
 > Die In-Loop-Reviewer ersetzen den früheren terminalen `lhtask-review.sh`-Aufruf am Ende der
 > Implement-Stage (der Hook kann Agent-Commits nicht reviewen, weil sie `AUTOPLAN_AGENT=1`
 > setzen). `lhtask-review.sh` läuft weiterhin für **menschliche** Commits in den Review-Dirs —
-> report-only, inklusive eines Fallow-Abschnitts (Report: `.git/lhtask-fallow.json`).
+> report-only, inklusive eines Fallow-Abschnitts (Report: `.git/lhtask-fallow.json`) und des
+> `### Tooling`-Abschnitts.
 > `LHTASK_REVIEW_AUTONOMOUS=0` schaltet die Reviewer-Phase ab (Gate-only-Schleife).
 > Nur `gate.json` ist maschinen-vertrauenswürdig (von der Shell geschrieben); Agent-JSON wird
 > jq-oder-grep und **fail-closed** gelesen (fehlend/kaputt = blocker → Loopback, nie stilles DONE).
@@ -283,6 +284,12 @@ sequenceDiagram
 > (`LHTASK_FORCE_CLAUDE=1`), bevor fail-closed greift. Jede Degradation wird protokolliert
 > (`lhtask_model_fallback_note`) und als ❌ unter `### Model fallbacks` in `TODO.review.md`
 > sichtbar (→ 🔎-Pointer + AGENT_LOG) — nie still.
+>
+> **Tooling-Sichtbarkeit:** jede `TODO.review.md` (In-Loop-Surface **und** Standalone-Review) endet
+> mit einem `### Tooling`-Abschnitt (`lhtask_tooling_to_md`): codegraph (Binary **und** Repo-Index),
+> fallow, jq, timeout als ✅/⚠️ mit Install-Hinweis und konkretem Impact. Die Kette degradiert
+> graceful, aber degradiertes Tooling wird **gemeldet**, nie verschwiegen — bewusstes `off`
+> (`LHTASK_CODEGRAPH`/`LHTASK_FALLOW`) erscheint als neutrale Notiz, ⚠️ zählt in die Ampel.
 
 ---
 
@@ -470,7 +477,9 @@ flowchart TB
     S7 --> S8[".gitignore ergänzen<br/>autoplan/review/run.log + .lhtask-state/"]
     S8 --> S9["git config core.hooksPath .githooks"]
     S9 --> S10[".claude/settings.json<br/>Allowlist + Deny-Block mergen<br/>(keine abs. Pfade)"]
-    S10 --> DONE(["✅ Repo ist plug-and-play"])
+    S10 --> S11["Tooling-Check (Pflicht):<br/>codegraph (+ Index) · fallow · jq · timeout<br/>fehlend → Install-Hinweis + Impact"]
+    S11 --> S12{"Registry opt-in?<br/>(~/.config/lhtask/registry,<br/>default NEIN für interne Repos)"}
+    S12 --> DONE(["✅ Repo ist plug-and-play"])
 
     style DONE fill:#f0fdf4,stroke:#16a34a
     style OFFER fill:#fffbeb,stroke:#d97706
@@ -478,8 +487,11 @@ flowchart TB
 
 > Nach einem Plugin-Update bringt **`/lhtask:update`** die vendored Logik (Scripts, Hooks,
 > Agents, ggf. `.mcp.json`-Merge) im Repo auf Stand — `lhtask.conf` und die Lifecycle-Dateien
-> bleiben unangetastet; neue Config-Keys werden nur als Drift gemeldet. `--all` aktualisiert
-> alle in `~/.config/lhtask/registry` registrierten Repos.
+> bleiben unangetastet; neue Config-Keys werden nur als Drift gemeldet, und derselbe
+> Tooling-Report ist Pflichtteil jedes Updates. `--all` aktualisiert
+> alle in `~/.config/lhtask/registry` registrierten Repos — die Registry wird dabei nur
+> **konsumiert** (Registrieren ist ausschließlich Sache des Bootstrap, dort opt-in mit
+> expliziter Nachfrage; `update` registriert nie selbst).
 
 ---
 
@@ -535,5 +547,5 @@ tail -f TODO.run.log                        # konsolidierter Live-Trace (pro Tri
 LHTASK_FOREGROUND=1 .githooks/post-commit   # getriggerte Stage synchron ausführen
 cat .git/lhtask-implement.log               # roher Per-Stage-Log
 touch .git/autoplan.disabled                # Killswitch (entfernen = wieder an)
-bash tests/smoke-test.sh                    # Smoke-Test: Unit-Teil (Modell-Auflösung, ohne claude) + E2E (Wegwerf-Repo, braucht claude-CLI)
+bash tests/smoke-test.sh                    # Smoke-Test: Unit-Teil (Modell-Auflösung + Tooling-Surface, ohne claude) + E2E (Wegwerf-Repo, braucht claude-CLI)
 ```

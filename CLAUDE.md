@@ -20,7 +20,8 @@ build, lint, or test toolchain. The "code" is:
 - `docs/DISTRIBUTION.md` — the **binding distribution & separation model**: GitHub is the only
   install channel, also for maintainers (`--plugin-dir` is test-only, e.g. the smoke test); data
   flows one-way plugin → consumer; updates are pull-based (`/lhtask:update` run *inside* the
-  consumer repo); the registry (`~/.config/lhtask/registry`) is opt-in — never reach into
+  consumer repo); the registry (`~/.config/lhtask/registry`) is opt-in — `bootstrap` asks before
+  registering, `update` is consume-only and never self-registers; never reach into
   consumer repos from plugin-dev sessions,
 - `docs/CROSS-VENDOR.md` — setup guide for running individual roles on **non-Claude models**
   (the `openrouter:` prefix + translating proxy, see the configuration section below).
@@ -45,7 +46,7 @@ When bootstrapped into a repo, `templates/githooks/post-commit` routes each comm
   **`lhtask-implement.sh`** in the same detached run.
 - commit changed any `LHTASK_REVIEW_DIRS/` → **`lhtask-review.sh`** (writes `TODO.review.md`,
   report-only; for single-commit targets it also runs fallow and appends a `### Fallow` section,
-  report at `.git/lhtask-fallow.json`).
+  report at `.git/lhtask-fallow.json`; every report ends with a `### Tooling` section).
 
 `lhtask-implement.sh` is a **shell-driven subagent-team orchestrator** in an **isolated
 `git worktree`** on `LHTASK_IMPL_BRANCH` (default `autoplan/impl`). It runs **planner → navigator**
@@ -68,7 +69,8 @@ in `.lhtask-state/` inside the worktree (excluded from commits via the worktree'
 **Only `gate.json` is machine-trusted** (shell-authored); agent JSON is parsed jq-or-grep,
 **fail-closed** (missing/garbled review JSON = blocker → loopback, never a silent DONE).
 
-On convergence or exhaustion, `lhtask_findings_surface` publishes `TODO.review.md` and the
+On convergence or exhaustion, `lhtask_findings_surface` publishes `TODO.review.md` (sections:
+Gate · Fallow · Model fallbacks · Reviews · Tooling) and the
 `## 🔎` pointer — the in-loop reviewers replace the old terminal `lhtask-review.sh` call (the hook
 can't review agent commits because they set `AUTOPLAN_AGENT=1`; `LHTASK_REVIEW_AUTONOMOUS=0` leaves
 a gate-only loop). The impl branch is **never auto-merged** and **hard-reset (`-B`) each run** — it
@@ -94,6 +96,12 @@ When changing any stage script, preserve these load-bearing invariants:
   never a hard fail; missing `timeout`/`gtimeout` just means no per-phase timeout. Fallow follows
   the same rule: not installed → skip, runtime/config error (exit 2) → skip, and it is **never
   `npx`-downloaded** (only an already-installed binary runs — the gate stays offline-deterministic).
+- **Tooling visibility (graceful, never silent):** degraded tooling must be REPORTED —
+  `lhtask_tooling_to_md` writes the `### Tooling` section of every `TODO.review.md` (in-loop via
+  `lhtask_findings_surface` and standalone in `lhtask-review.sh`): codegraph (binary **and** repo
+  index), fallow, jq, timeout as ✅/⚠️ with install hint and concrete impact; a deliberate `off`
+  config shows as a neutral note, ⚠️ counts into the traffic-light summary. The `bootstrap` and
+  `update` skills run the same check as a mandatory step. Don't let a new tool skip silently.
 - **Permission hardening:** `AUTOPLAN_AGENT=1` is set centrally in `run_phase` (never per
   call-site). Every role gets the hard deny rules from `lhtask_deny_settings` via `--settings`
   (`git push`/`git reset --hard`/`git rebase`/`rm -rf`/`Task`/`Agent` — deny is evaluated first
@@ -150,7 +158,10 @@ Skills are markdown with YAML frontmatter (`name`, `description`, `argument-hint
 `bootstrap` is an *idempotent installer* (`cp -n` everywhere; never clobbers an existing file without
 asking). `update` *re-syncs the vendored chain* in already-bootstrapped repos (overwrites only logic
 files — scripts, hooks, agents; never `lhtask.conf` or lifecycle files; `--all` consumes the registry
-at `~/.config/lhtask/registry`). Both resolve templates from the plugin **as installed**:
+at `~/.config/lhtask/registry` — registering is exclusively `bootstrap`'s job, opt-in with an
+explicit ask; `update` never self-registers). Both end with a **mandatory tooling check**
+(codegraph incl. repo index, fallow, jq, timeout — install command + concrete impact when
+missing, mirroring the `### Tooling` report section). Both resolve templates from the plugin **as installed**:
 `${CLAUDE_PLUGIN_ROOT}/templates`, falling back to the newest marketplace-cache copy
 (`~/.claude/plugins/cache/*/lhtask/*/templates`) when `CLAUDE_PLUGIN_ROOT` is unset — and otherwise
 they stop with the GitHub install instruction. Never let them search the filesystem or accept a
@@ -197,7 +208,8 @@ silently forgotten. If you add a real exclusion, change it in *both* places.
 `tests/smoke-test.sh` is the end-to-end smoke test: it starts with a claude-free unit section
 covering the `lhtask_model_flags` resolution chain (role beats global, fallback, name mapping) and
 its cross-vendor branch (prefix parsing, env injection, no-proxy/unreachable fallback + recording,
-forced-Claude retry, `lhtask_model_is_xvendor`), then bootstraps the plugin into a throwaway repo
+forced-Claude retry, `lhtask_model_is_xvendor`) plus the tooling surface (`lhtask_tooling_to_md`
+reports every supporting tool; `off` → neutral note), then bootstraps the plugin into a throwaway repo
 (`claude -p --plugin-dir … "/lhtask:bootstrap"`), commits a `TODO.md` task, runs the chain with
 `LHTASK_FOREGROUND=1`, and asserts `TODO.run.log` was produced. The E2E part needs the `claude`
 CLI, so it is not run in CI. To debug a change manually, bootstrap into a throwaway git repo and use:
