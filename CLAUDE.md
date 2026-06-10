@@ -14,8 +14,14 @@ build, lint, or test toolchain. The "code" is:
 - a set of **bash templates** (`templates/`) that `bootstrap` copies into a *target* repo,
 - the **subagent team** (`agents/*.md`) — six role definitions (planner, navigator, implementer,
   reviewer-correctness, reviewer-conventions, reviewer-visual) used by the implement loop,
-- plugin metadata (`.claude-plugin/plugin.json`, `marketplace.json`, `CHANGELOG.md` — keep the
-  version in sync across all three when releasing).
+- plugin metadata (`.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` — the CLI
+  resolves exactly that marketplace path, keep it there — plus `CHANGELOG.md`; keep the version
+  in sync across all three when releasing),
+- `docs/DISTRIBUTION.md` — the **binding distribution & separation model**: GitHub is the only
+  install channel, also for maintainers (`--plugin-dir` is test-only, e.g. the smoke test); data
+  flows one-way plugin → consumer; updates are pull-based (`/lhtask:update` run *inside* the
+  consumer repo); the registry (`~/.config/lhtask/registry`) is opt-in — never reach into
+  consumer repos from plugin-dev sessions.
 
 Critical mental model: the scripts in `templates/scripts/` and `templates/githooks/` **do not run
 here**. They are parameterized files that get copied (`cp -n`) into another repo by the `bootstrap`
@@ -147,7 +153,8 @@ This repo has no build toolchain, but a small `Makefile` wraps the setup + doc +
 - `make sync-agents` — copy `agents/*.md` → `templates/.claude/agents/` (the two must stay identical).
 
 CI (`.github/workflows/ci.yml`) runs on push/PR to `main`: it validates the JSON manifests
-(`plugin.json`, `marketplace.json`) and runs `shellcheck` + `bash -n` over the template scripts.
+(`.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`) and runs `shellcheck` +
+`bash -n` over the template scripts.
 
 `.githooks/pre-push` keeps those docs in sync: when a push changes a **source** file it regenerates
 the docs, commits them, and pushes that commit along (one `git push`, docs included). It is

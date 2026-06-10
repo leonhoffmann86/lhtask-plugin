@@ -70,6 +70,13 @@ flowchart LR
 > `commands/*.md` sind dünne Slash-Command-Wrapper (je einer pro Skill): gleiche
 > `description`/`argument-hint`-Frontmatter, der Body ruft nur den Skill auf und reicht
 > `$ARGUMENTS` durch — bei Skill-Änderungen die Wrapper-Frontmatter mitziehen.
+>
+> **Distribution** (verbindlich: [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md)): installiert wird
+> **ausschließlich über GitHub** — `claude plugin marketplace add leonhoffmann86/lhtask-plugin`,
+> dann `claude plugin install lhtask@lhtask-marketplace` (das Marketplace-Manifest liegt dafür
+> exakt unter `.claude-plugin/marketplace.json`). `--plugin-dir` ist nur zum Testen des Plugins
+> selbst. Daten fließen einbahnig Plugin → Consumer; Updates sind pull-basiert (`/lhtask:update`
+> im Ziel-Repo).
 
 ---
 

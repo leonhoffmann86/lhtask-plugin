@@ -1,7 +1,7 @@
 # LHTask — Autonomous TODO Workflow for Claude Code
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.3.0-blue)](https://github.com/leonhoffmann86/lhtask-plugin)
+[![Version](https://img.shields.io/badge/version-0.3.1-blue)](https://github.com/leonhoffmann86/lhtask-plugin)
 [![Built for Claude Code](https://img.shields.io/badge/Built_for-Claude_Code-orange)](https://claude.ai/code)
 
 **Turn a rough idea into a reviewed, tested implementation — automatically.**
@@ -40,13 +40,18 @@ graph LR
 ## Install & use
 
 ```bash
-claude --plugin-dir /path/to/lhtask-plugin     # or: /plugin marketplace add <git-url>
+# one-time (GitHub is the only install channel — see docs/DISTRIBUTION.md):
+claude plugin marketplace add leonhoffmann86/lhtask-plugin
+claude plugin install lhtask@lhtask-marketplace
 
 # inside any repo you want to enable:
 /lhtask:bootstrap                               # writes hooks + lhtask.conf + starters
 /lhtask:lh-task "your idea"                     # capture the first task
 git add TODO.md && git commit -m "task: ..."    # starts the chain
 ```
+
+Pick up a new release later: `claude plugin marketplace update lhtask-marketplace &&
+claude plugin update lhtask`, then `/lhtask:update` inside each bootstrapped repo.
 
 Kill switch: `touch .git/autoplan.disabled` · live trace: `tail -f TODO.run.log`.
 
@@ -83,6 +88,7 @@ automation* below) — start here:
 - **[templates/lhtask.conf](templates/lhtask.conf)** — the single config (review dirs, gate commands, impl branch, max iterations, model, …).
 - **[templates/AGENTS.md](templates/AGENTS.md)** — the starter *constitution* whose risk tiers the autonomous implementer obeys.
 - **[templates/githooks/README.md](templates/githooks/README.md)** — what the installed `post-commit` chain does, stage by stage.
+- **[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)** — the binding distribution & separation model (GitHub-only install, one-way data flow, pull-based updates).
 
 ## Doc automation
 
