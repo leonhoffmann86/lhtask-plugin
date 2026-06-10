@@ -45,9 +45,13 @@ RUNLOG="$ROOT/TODO.run.log"
 if git show-ref --verify --quiet "refs/heads/$TARGET" && [ "$(git rev-parse "$TARGET")" != "$(git rev-parse HEAD)" ]; then
   SCOPE="branch ${TARGET} (autonomous work): inspect every commit it introduces with \`git log --stat HEAD..${TARGET}\` and \`git show <sha>\` per commit"
   WHAT="the autonomous implementation on branch ${TARGET}"
+  # Fallow analyzes the CHECKED-OUT tree; a branch target isn't checked out here —
+  # and its commits were already fallow-gated inside the implement worktree.
+  FALLOW_BASE=""
 else
   SCOPE="commit ${SHA}: inspect with \`git show ${SHA}\` and \`git show --stat ${SHA}\`"
   WHAT="commit ${SHA}"
+  FALLOW_BASE="${TARGET}~1"
 fi
 
 read -r -d '' PROMPT <<EOF || true
@@ -86,6 +90,19 @@ do_run() {
       --permission-mode acceptEdits \
       --allowed-tools Read Write Glob Grep Bash \
       ${LHTASK_MODEL_FLAGS[@]+"${LHTASK_MODEL_FLAGS[@]}"} 2>&1 || true; } | tee -a "$RUNLOG" >"$LOG"
+  # Fallow static analysis (dead code / duplication / complexity) — part of every
+  # review. Appended BEFORE the surface so its ❌ counts toward the 🔎 pointer.
+  # Exit 1 (findings) is data, not an error; no fallow installed → no section.
+  if [ -n "$FALLOW_BASE" ]; then
+    FCMD="$(lhtask_fallow_cmd "$FALLOW_BASE")"
+    if [ -n "$FCMD" ]; then
+      FJSON="$ROOT/.git/lhtask-fallow.json"
+      eval "$FCMD" >"$FJSON" 2>>"$LOG" || true
+      { printf '\n### Fallow (static analysis)\n'
+        lhtask_fallow_to_md "$FJSON" | sed 's|\.lhtask-state/fallow\.json|.git/lhtask-fallow.json|'
+      } >> "$ROOT/TODO.review.md"
+    fi
+  fi
   lhtask_surface_review | tee -a "$RUNLOG"
 }
 

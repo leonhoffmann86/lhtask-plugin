@@ -5,6 +5,25 @@ All notable changes to LHTask will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-06-10
+
+### Added
+- Fallow static analysis (<https://docs.fallow.tools>) integrated into the review chain:
+  - Fifth deterministic gate check: `fallow audit` scoped to the item commit's changeset,
+    gated "new-only" (only findings *introduced* by the change fail → loopback to the
+    implementer with the JSON report as part of the fix list)
+  - Raw report saved as `.lhtask-state/fallow.json`; reviewers are instructed to fold
+    its findings into their verdict
+  - `### Fallow` section in `TODO.review.md` (both the in-loop surface and the
+    standalone stage-3 review of human commits)
+  - Config: `LHTASK_FALLOW` (`auto` = run if installed on PATH or `./node_modules/.bin`,
+    `off` = never) and `LHTASK_FALLOW_CMD` (full command override with `{base}`
+    placeholder — e.g. to add the licensed runtime layer via `--coverage`)
+  - Graceful no-op throughout: not installed → check skipped; fallow runtime/config
+    error (exit 2) → skip, never a hard fail; never `npx`-downloads (gate stays offline)
+
+[0.3.0]: https://github.com/leonhoffmann86/lhtask-plugin/releases/tag/v0.3.0
+
 ## [0.2.0] — 2026-06-10
 
 ### Added

@@ -87,6 +87,33 @@ for check in lint typecheck test build; do
   fi
 done
 
+# FIFTH check: fallow audit (dead code / duplication / complexity), scoped to the
+# changeset and gated "new-only" — only findings INTRODUCED by this change fail
+# (exit 1); pre-existing/inherited findings and warn-tier issues pass (exit 0).
+# Exit 2 = fallow runtime/config error → recorded as skip, never a hard fail (an
+# analysis-tool problem must not block the chain). The raw JSON report is saved
+# next to the gate json (fallow.json) for the review surface + reviewer roles.
+fcmd="$(lhtask_fallow_cmd HEAD~1)"
+if [ -z "$fcmd" ]; then
+  add_record fallow "" skip "" "fallow off or not installed"
+else
+  first="$(printf '%s' "$fcmd" | awk '{print $1}')"
+  if ! command -v "$first" >/dev/null 2>&1 && [ ! -x "$first" ]; then
+    add_record fallow "$fcmd" skip "" "tool '$first' not on PATH"
+  else
+    out="$(eval "$fcmd" 2>&1)"; rc=$?
+    [ "$OUT" != /dev/stdout ] && printf '%s\n' "$out" > "$(dirname "$OUT")/fallow.json" 2>/dev/null
+    if [ "$rc" -eq 0 ]; then
+      add_record fallow "$fcmd" pass "$rc" "ok (no introduced error-severity findings)"
+    elif [ "$rc" -eq 2 ]; then
+      add_record fallow "$fcmd" skip "$rc" "fallow runtime/config error — skipped"
+    else
+      verdict="fail"
+      add_record fallow "$fcmd" fail "$rc" "introduced error-severity findings (exit $rc)" "$(printf '%s' "$out" | tail -n 40)"
+    fi
+  fi
+fi
+
 printf '{"iteration":%s,"stack":%s,"verdict":%s,"checks":[%s]}\n' \
   "${iter:-0}" "$(jstr "$stack")" "$(jstr "$verdict")" "$records" > "$OUT"
 

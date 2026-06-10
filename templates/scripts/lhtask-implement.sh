@@ -146,6 +146,9 @@ the single item commit. Do not change unrelated code.
 [deterministic gate findings — .lhtask-state/gate.json]
 $(cat "$STATE_DIR/gate.json" 2>/dev/null || true)
 
+[fallow static analysis (dead code/duplication/complexity) — .lhtask-state/fallow.json]
+$(cat "$STATE_DIR/fallow.json" 2>/dev/null || true)
+
 [reviewer findings]
 $(cat "$STATE_DIR"/review-*.json 2>/dev/null || true)
 "
@@ -181,6 +184,9 @@ ${DONE}"
 
 The deterministic gate is already GREEN — do not re-run it. Review the latest commit on
 branch ${BR}. Plan: .lhtask-state/plan.json   Navigation: .lhtask-state/navigation.json
+If .lhtask-state/fallow.json exists, read it too (deterministic fallow static analysis:
+dead code, duplication, complexity for this change) and fold relevant findings into
+your verdict — it is part of this review.
 ACTIVE TODO item(s):
 ${ACTIVE}"
     run_phase reviewer-correctness "${REV_BASE}

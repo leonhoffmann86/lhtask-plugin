@@ -31,8 +31,11 @@ each role its own headless `claude -p`:
    - **implementer** → smallest change; one commit per item (code **+** `TODO.md`→`DONE.md` **+**
      `AGENT_LOG.md`). It can commit but **cannot** push / `git reset --hard` / `rm -rf` (denied).
    - **deterministic gate** (`lhtask-gate.sh`, pure shell, no LLM) → runs the stack's
-     lint / typecheck / test / build (`LHTASK_GATE_*` / `LHTASK_STACK`). A missing tool is skipped,
-     not failed. **Red → loop back** to the implementer with the failures as the fix list.
+     lint / typecheck / test / build (`LHTASK_GATE_*` / `LHTASK_STACK`) plus, if installed,
+     **fallow** static analysis (`fallow audit`: dead code / duplication / complexity, scoped to
+     the changeset, "new-only" — only findings the change *introduces* fail; `LHTASK_FALLOW`).
+     A missing tool is skipped, not failed. **Red → loop back** to the implementer with the
+     failures as the fix list.
    - **reviewers** (read-only) → correctness + conventions. `blocker`/`major` findings → loop back.
    - all green + no blocker/major → **DONE**.
 4. loop exhausted without converging → escalated to `## 🔎 Review-Findings` (+ `AGENT_LOG`); the

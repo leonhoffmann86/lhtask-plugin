@@ -30,6 +30,8 @@ lhtask_load_config() {
   LHTASK_GATE_TYPECHECK=""
   LHTASK_GATE_TEST=""            # empty → falls back to LHTASK_TEST_CMD
   LHTASK_GATE_BUILD=""
+  LHTASK_FALLOW="auto"           # fallow static analysis: auto (run if installed) | off
+  LHTASK_FALLOW_CMD=""           # empty → built-in `fallow audit` default ({base} placeholder)
   LHTASK_MAX_ITER="3"            # bounded implement↔gate↔review loop (convergence guarantee)
   LHTASK_PHASE_TIMEOUT="600"     # per-phase `claude -p` timeout in seconds (bounds lock hold)
   LHTASK_VISUAL_MAX_DIFF_RATIO="0.02"   # stage 2 (visual reviewer)
@@ -172,6 +174,58 @@ lhtask_gate_cmd() {
     rust:build)       printf '%s' 'cargo build';;
     *) return 0;;   # no built-in for this (stack,check) → skip
   esac
+}
+
+# Resolve the fallow binary (https://docs.fallow.tools — dead code / duplication /
+# complexity analysis). Echoes the binary (PATH name or ./node_modules/.bin path
+# relative to the CALLER's cwd) or nothing when disabled/not installed. Deliberately
+# never `npx fallow`: the gate is offline-deterministic, so only an already-installed
+# fallow runs — graceful no-op otherwise.
+lhtask_fallow_bin() {
+  [ "${LHTASK_FALLOW:-auto}" = off ] && return 0
+  if command -v fallow >/dev/null 2>&1; then printf 'fallow'; return 0; fi
+  [ -x "./node_modules/.bin/fallow" ] && printf '%s' './node_modules/.bin/fallow'
+  return 0
+}
+
+# Resolve the full fallow command for a given base ref ($1, default HEAD~1).
+# Echoes the command or nothing (→ the caller skips). Priority: LHTASK_FALLOW=off →
+# empty; explicit LHTASK_FALLOW_CMD (with {base} substituted) → built-in default:
+# `fallow audit` scoped to the changeset, "new-only" gate, JSON to stdout.
+lhtask_fallow_cmd() {
+  [ "${LHTASK_FALLOW:-auto}" = off ] && return 0
+  local base="${1:-HEAD~1}" bin
+  if [ -n "${LHTASK_FALLOW_CMD:-}" ]; then
+    printf '%s' "${LHTASK_FALLOW_CMD//\{base\}/$base}"; return 0
+  fi
+  bin="$(lhtask_fallow_bin)"
+  [ -n "$bin" ] || return 0
+  printf '%s audit --base %s --gate new-only --format json --quiet' "$bin" "$base"
+}
+
+# fallow.json (audit --format json) → one ✅/⚠️/❌ markdown line for TODO.review.md.
+# Report-only consumer, so FAIL-OPEN: a missing file just means fallow didn't run
+# (off / not installed) — the gate already enforced the verdict where it matters.
+lhtask_fallow_to_md() {
+  local f="$1"
+  [ -s "$f" ] || { printf -- '- fallow: not run (disabled or not installed)\n'; return; }
+  if command -v jq >/dev/null 2>&1 && jq -e . "$f" >/dev/null 2>&1; then
+    jq -r '
+      (if .verdict=="pass" then "✅" elif .verdict=="warn" then "⚠️" else "❌" end)
+      + " fallow: " + (.verdict // "?")
+      + " — introduced: dead-code " + ((.attribution.dead_code_introduced // 0)|tostring)
+      + ", complexity " + ((.attribution.complexity_introduced // 0)|tostring)
+      + ", duplication " + ((.attribution.duplication_introduced // 0)|tostring)
+      + " (" + ((.changed_files_count // 0)|tostring) + " changed files; details: .lhtask-state/fallow.json)"' "$f"
+  elif grep -Eq '"verdict"[[:space:]]*:[[:space:]]*"fail"' "$f"; then
+    printf '❌ fallow: error-severity findings (see fallow.json)\n'
+  elif grep -Eq '"verdict"[[:space:]]*:[[:space:]]*"warn"' "$f"; then
+    printf '⚠️ fallow: warn-severity findings (see fallow.json)\n'
+  elif grep -Eq '"verdict"[[:space:]]*:[[:space:]]*"pass"' "$f"; then
+    printf '✅ fallow: clean\n'
+  else
+    printf '⚠️ fallow: unrecognizable report\n'
+  fi
 }
 
 # Build an --mcp-config flag array for headless claude (empty if no vendored config
@@ -320,11 +374,16 @@ lhtask_surface_review() {
 # Build TODO.review.md from the structured artifacts (gate + reviews), then hand off
 # to lhtask_surface_review for the ## 🔎 / AGENT_LOG / notify surface (verbatim).
 lhtask_findings_surface() {  # $1 = gate.json ; $2.. = review-*.json files
-  local root="${ROOT:-$LHTASK_ROOT}" gate="$1" f; shift
+  local root="${ROOT:-$LHTASK_ROOT}" gate="$1" f fallow; shift
+  fallow="$(dirname "$gate")/fallow.json"   # written by lhtask-gate.sh when fallow ran
   {
     printf '> Review of %s — %s\n\n' "${SHA:-autoplan/impl}" "$(date '+%Y-%m-%d %H:%M')"
     printf '### Gate\n'
     lhtask_json_checks_to_md "$gate"
+    if [ -s "$fallow" ]; then
+      printf '\n### Fallow (static analysis)\n'
+      lhtask_fallow_to_md "$fallow"
+    fi
     printf '\n### Reviews\n'
     for f in "$@"; do lhtask_json_findings_to_md "$f"; done
   } > "$root/TODO.review.md"
