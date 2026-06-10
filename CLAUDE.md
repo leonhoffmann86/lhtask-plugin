@@ -131,8 +131,12 @@ Skills are markdown with YAML frontmatter (`name`, `description`, `argument-hint
 `bootstrap` is an *idempotent installer* (`cp -n` everywhere; never clobbers an existing file without
 asking). `update` *re-syncs the vendored chain* in already-bootstrapped repos (overwrites only logic
 files — scripts, hooks, agents; never `lhtask.conf` or lifecycle files; `--all` consumes the registry
-at `~/.config/lhtask/registry`). Both resolve templates via `${CLAUDE_PLUGIN_ROOT}/templates` — keep
-that path relationship intact if you move files. The `description` field is what triggers the skill,
+at `~/.config/lhtask/registry`). Both resolve templates from the plugin **as installed**:
+`${CLAUDE_PLUGIN_ROOT}/templates`, falling back to the newest marketplace-cache copy
+(`~/.claude/plugins/cache/*/lhtask/*/templates`) when `CLAUDE_PLUGIN_ROOT` is unset — and otherwise
+they stop with the GitHub install instruction. Never let them search the filesystem or accept a
+development checkout as `$TPL` (enforces `docs/DISTRIBUTION.md`); keep the
+`templates/` path relationship intact if you move files. The `description` field is what triggers the skill,
 so keep it specific and outcome-oriented. Each skill has a thin wrapper in `commands/<name>.md`
 (same frontmatter shape, body just invokes the skill and forwards `$ARGUMENTS`) — when you change a
 skill's `description`/`argument-hint`, update the wrapper's to match.

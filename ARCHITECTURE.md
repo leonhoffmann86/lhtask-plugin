@@ -75,7 +75,10 @@ flowchart LR
 > **ausschließlich über GitHub** — `claude plugin marketplace add leonhoffmann86/lhtask-plugin`,
 > dann `claude plugin install lhtask@lhtask-marketplace` (das Marketplace-Manifest liegt dafür
 > exakt unter `.claude-plugin/marketplace.json`). `--plugin-dir` ist nur zum Testen des Plugins
-> selbst. Daten fließen einbahnig Plugin → Consumer; Updates sind pull-basiert (`/lhtask:update`
+> selbst. Die Skills erzwingen das: Templates kommen aus `${CLAUDE_PLUGIN_ROOT}/templates`, mit
+> Fallback auf die installierte Marketplace-Cache-Kopie — ein Dev-Checkout wird **nie** als
+> Template-Quelle akzeptiert (ohne Installation stoppen sie mit der Install-Anweisung).
+> Daten fließen einbahnig Plugin → Consumer; Updates sind pull-basiert (`/lhtask:update`
 > im Ziel-Repo).
 
 ---
@@ -447,7 +450,7 @@ Wie die Kette einmalig in ein Repo eingebaut wird — idempotent, nichts wird st
 
 ```mermaid
 flowchart TB
-    S0["/lhtask:bootstrap"] --> S1["Templates finden<br/>${CLAUDE_PLUGIN_ROOT}/templates"]
+    S0["/lhtask:bootstrap"] --> S1["Templates finden (nur installiertes Plugin)<br/>${CLAUDE_PLUGIN_ROOT}/templates<br/>Fallback: Marketplace-Cache — nie ein Dev-Checkout"]
     S1 --> S2{"git-Repo?"}
     S2 -- "nein" --> OFFER["git init anbieten"]
     S2 -- "ja" --> S3["Projekttyp erkennen<br/>pyproject/package.json/composer.json/go.mod/Cargo.toml"]
