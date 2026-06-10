@@ -8,9 +8,9 @@ This is the **source of the `lhtask` Claude Code plugin** — not an application
 build, lint, or test toolchain. The "code" is:
 
 - three **skills** (`skills/lh-task`, `skills/bootstrap`, `skills/update`) — markdown prompt files
-  with frontmatter,
-- three **slash-command wrappers** (`commands/*.md`) — thin 1:1 shims that invoke the matching
-  skill via the Skill tool and pass `$ARGUMENTS` through,
+  with frontmatter; the skills register the namespaced `/lhtask:*` slash commands themselves —
+  there is deliberately **no `commands/` directory** (wrappers there registered the same names and
+  *shadowed* the skills; removed in v0.3.3 — `skills/` is canonical, don't add wrappers back),
 - a set of **bash templates** (`templates/`) that `bootstrap` copies into a *target* repo,
 - the **subagent team** (`agents/*.md`) — six role definitions (planner, navigator, implementer,
   reviewer-correctness, reviewer-conventions, reviewer-visual) used by the implement loop,
@@ -137,9 +137,10 @@ at `~/.config/lhtask/registry`). Both resolve templates from the plugin **as ins
 they stop with the GitHub install instruction. Never let them search the filesystem or accept a
 development checkout as `$TPL` (enforces `docs/DISTRIBUTION.md`); keep the
 `templates/` path relationship intact if you move files. The `description` field is what triggers the skill,
-so keep it specific and outcome-oriented. Each skill has a thin wrapper in `commands/<name>.md`
-(same frontmatter shape, body just invokes the skill and forwards `$ARGUMENTS`) — when you change a
-skill's `description`/`argument-hint`, update the wrapper's to match.
+so keep it specific and outcome-oriented. The skills register the `/lhtask:*` slash commands
+themselves — never add `commands/*.md` wrappers: they register the same names and **shadow the
+skills** (invoking the skill then returns the instruction-less wrapper body; this is exactly what
+v0.3.3 removed).
 
 Agent files (`agents/*.md`) carry their own frontmatter (`name`, `description`, `tools`, `model`)
 for interactive use; the headless loop strips it. `reviewer-visual` is a **scaffold** — shipped and

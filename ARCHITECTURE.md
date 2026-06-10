@@ -32,7 +32,6 @@ flowchart LR
         SK1["skills/lh-task/SKILL.md<br/>Idee → 1 TODO-Item"]
         SK2["skills/bootstrap/SKILL.md<br/>idempotenter Installer"]
         SK3["skills/update/SKILL.md<br/>re-sync der vendored Kette"]
-        CMD["commands/*.md<br/>Slash-Command-Wrapper (1:1 zu den Skills)"]
         AG["agents/*.md<br/>Subagent-Team (6 Rollen)"]
         TPL["templates/<br/>githooks/ · scripts/ · lhtask.conf · .mcp.json<br/>.claude/agents/ · AGENTS.md · TODO/DONE/AGENT_LOG"]
     end
@@ -67,9 +66,9 @@ flowchart LR
 > `agents/` ändern, dann `make sync-agents`. Gleiches gilt für `.mcp.json` /
 > `templates/.mcp.json` (codegraph-MCP-Server).
 >
-> `commands/*.md` sind dünne Slash-Command-Wrapper (je einer pro Skill): gleiche
-> `description`/`argument-hint`-Frontmatter, der Body ruft nur den Skill auf und reicht
-> `$ARGUMENTS` durch — bei Skill-Änderungen die Wrapper-Frontmatter mitziehen.
+> Die Skills registrieren die `/lhtask:*`-Slash-Commands **selbst** — ein `commands/`-Verzeichnis
+> gibt es bewusst nicht mehr: Wrapper dort registrierten dieselben Namen und **überschatteten**
+> die Skills (in v0.3.3 entfernt; `skills/` ist kanonisch).
 >
 > **Distribution** (verbindlich: [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md)): installiert wird
 > **ausschließlich über GitHub** — `claude plugin marketplace add leonhoffmann86/lhtask-plugin`,
