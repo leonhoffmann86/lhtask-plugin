@@ -91,6 +91,20 @@ echo "--- Unit: lhtask_model_flags resolution ---"
   lhtask_model_is_xvendor reviewer-correctness || { echo "  UNIT FAIL: is_xvendor positive"; exit 1; }
   ! lhtask_model_is_xvendor reviewer-conventions || { echo "  UNIT FAIL: is_xvendor negative"; exit 1; }
   echo "  ok:  is_xvendor raw detection"
+
+  # --- tooling surface: every supporting tool is reported, never silent ---
+  TOOLING="$(lhtask_tooling_to_md "$PWD")"
+  for tool in codegraph fallow jq timeout; do
+    printf '%s\n' "$TOOLING" | grep -q "$tool" \
+      || { echo "  UNIT FAIL: tooling report misses '$tool'"; exit 1; }
+  done
+  printf '%s\n' "$TOOLING" | grep -Eq '^(✅|⚠️|-) codegraph' \
+    || { echo "  UNIT FAIL: codegraph line has no status marker"; exit 1; }
+  LHTASK_CODEGRAPH="off"
+  lhtask_tooling_to_md "$PWD" | grep -q -- '- codegraph: disabled' \
+    || { echo "  UNIT FAIL: codegraph off not neutral"; exit 1; }
+  LHTASK_CODEGRAPH="auto"
+  echo "  ok:  tooling surface reports all tools"
   echo "  model-resolution unit tests passed"
 ) || { echo "SMOKE FAIL: model resolution unit tests"; exit 1; }
 

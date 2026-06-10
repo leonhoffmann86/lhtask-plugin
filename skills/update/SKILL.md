@@ -59,15 +59,28 @@ default and a one-line description, and tell the user to add it if they want the
 Never rewrite their `lhtask.conf` automatically.
 
 ## 3. Sanity-check
-Run `bash -n` on each refreshed script; report any failure. Remind the user that the chain still
-no-ops gracefully without `claude`/`codegraph`.
+Run `bash -n` on each refreshed script; report any failure.
 
-## 4. Registry (for `--all`)
-Maintain a newline-delimited registry at `$REG`. When `/lhtask:bootstrap` runs it should append the
-repo's absolute path (deduped); this command consumes it for `--all`. If a registry entry no longer
-exists or isn't bootstrapped, drop it and note the cleanup. Keep it a plain path list — no other
-state.
+## 4. Tooling report (MANDATORY — the chain lives on its tool use)
+The chain degrades gracefully when supporting tools are missing, but the user must be
+told EXPLICITLY. Check and report each:
+- **codegraph** (<https://github.com/colbymchenry/codegraph>): `command -v codegraph` and the
+  repo index `.codegraph/codegraph.db`. Missing binary → roles run WITHOUT code-graph
+  intelligence; missing index → suggest `codegraph sync .` once.
+- **fallow** (<https://docs.fallow.tools>): on PATH or `./node_modules/.bin/fallow`
+  (unless `LHTASK_FALLOW=off`). Missing → the gate runs without static analysis;
+  suggest `npm i -g fallow` + `fallow init`.
+- **jq** and **timeout/gtimeout**: missing → degraded JSON parsing / no per-phase timeout.
+For anything missing, print the install command and the concrete impact — the same status
+appears as the `### Tooling` section in every `TODO.review.md`.
 
-## 5. Summarize
+## 5. Registry (consume-only — NEVER self-register)
+`$REG` is a newline-delimited path list consumed by `--all`. Registration is exclusively
+`/lhtask:bootstrap`'s job and opt-in there — this command must NOT add the current repo
+(users keep internal repos out of the registry deliberately; see `docs/DISTRIBUTION.md`).
+If an entry no longer exists or isn't bootstrapped, drop it and note the cleanup.
+
+## 6. Summarize
 Print, per repo: which files were refreshed/skipped, any `.mcp.json` merge, the config-drift keys to
-consider, and the reminder that `lhtask.conf` + lifecycle files were intentionally left untouched.
+consider, the tooling report, and the reminder that `lhtask.conf` + lifecycle files were
+intentionally left untouched.

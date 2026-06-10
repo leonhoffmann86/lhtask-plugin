@@ -181,6 +181,44 @@ lhtask_model_fallbacks_to_md() {
   printf -- '- a configured cross-vendor model did NOT review this change — fix the proxy/config (lhtask.conf: LHTASK_PROXY_URL, docs/CROSS-VENDOR.md)\n'
 }
 
+# Tool availability → ✅/⚠️ markdown lines for the "### Tooling" section of
+# TODO.review.md. The chain DEGRADES gracefully when supporting tools are missing,
+# but degradation must be REPORTED, never silent — codegraph and fallow are core to
+# the plugin's review quality ("tool use is the product"). ⚠️ lines count into the
+# report's traffic-light summary; deliberate `off` config shows as a neutral note.
+lhtask_tooling_to_md() {  # $1 = repo root (default: $ROOT/$LHTASK_ROOT)
+  local root="${1:-${ROOT:-$LHTASK_ROOT}}"
+  # codegraph — code intelligence for navigator/planner/reviewers
+  if [ "${LHTASK_CODEGRAPH:-auto}" = off ]; then
+    printf -- '- codegraph: disabled (LHTASK_CODEGRAPH=off)\n'
+  elif ! command -v codegraph >/dev/null 2>&1; then
+    printf '⚠️ codegraph: NOT installed — roles ran without code-graph intelligence (install: https://github.com/colbymchenry/codegraph)\n'
+  elif [ ! -f "$root/.codegraph/codegraph.db" ]; then
+    printf '⚠️ codegraph: installed but no index in this repo — run `codegraph sync .` once (the hook keeps it fresh afterwards)\n'
+  else
+    printf '✅ codegraph: active (index present)\n'
+  fi
+  # fallow — static-analysis gate check
+  if [ "${LHTASK_FALLOW:-auto}" = off ]; then
+    printf -- '- fallow: disabled (LHTASK_FALLOW=off)\n'
+  elif [ -n "${LHTASK_FALLOW_CMD:-}" ] || [ -n "$(lhtask_fallow_bin)" ]; then
+    printf '✅ fallow: active\n'
+  else
+    printf '⚠️ fallow: NOT installed — gate ran without dead-code/duplication/complexity analysis (install: npm i -g fallow · https://docs.fallow.tools)\n'
+  fi
+  # helpers whose absence silently degrades parsing/timeouts
+  if command -v jq >/dev/null 2>&1; then
+    printf '✅ jq: present\n'
+  else
+    printf '⚠️ jq: missing — JSON verdicts fall back to grep parsing (brew install jq)\n'
+  fi
+  if command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; then
+    printf '✅ timeout: present\n'
+  else
+    printf '⚠️ timeout: missing — headless phases run without a per-phase timeout (macOS: brew install coreutils)\n'
+  fi
+}
+
 # True (0) if a review sidecar holds parseable JSON with a recognizable verdict —
 # the precondition for SKIPPING the cross-vendor safety-net retry.
 lhtask_review_parseable() {
@@ -483,6 +521,8 @@ lhtask_findings_surface() {  # $1 = gate.json ; $2.. = review-*.json files
     fi
     printf '\n### Reviews\n'
     for f in "$@"; do lhtask_json_findings_to_md "$f"; done
+    printf '\n### Tooling\n'
+    lhtask_tooling_to_md "$root"
   } > "$root/TODO.review.md"
   lhtask_surface_review
 }

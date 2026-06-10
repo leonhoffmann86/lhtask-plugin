@@ -5,6 +5,24 @@ All notable changes to LHTask will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — 2026-06-10
+
+### Added
+- `### Tooling` section in every `TODO.review.md` (in-loop surface and standalone
+  review): ✅/⚠️ status per supporting tool — codegraph (binary + repo index), fallow,
+  jq, timeout — with install command and concrete impact when missing. The chain
+  still degrades gracefully, but degraded tooling is now REPORTED, never silent
+- `bootstrap` and `update` skills gained a mandatory tooling-check step with the
+  same install hints (codegraph: <https://github.com/colbymchenry/codegraph>,
+  fallow: <https://docs.fallow.tools>)
+
+### Fixed
+- `update` no longer self-registers the current repo in `~/.config/lhtask/registry`
+  (consume-only). Registration is exclusively `bootstrap`'s job and now OPT-IN with
+  an explicit ask — internal repos stay out of the registry deliberately
+
+[0.6.0]: https://github.com/leonhoffmann86/lhtask-plugin/releases/tag/v0.6.0
+
 ## [0.5.0] — 2026-06-10
 
 ### Added

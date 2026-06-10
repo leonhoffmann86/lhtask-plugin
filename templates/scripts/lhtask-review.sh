@@ -114,6 +114,9 @@ do_run() {
       lhtask_model_fallbacks_to_md "$LHTASK_MODEL_FALLBACK_LOG"
     } >> "$ROOT/TODO.review.md"
   fi
+  # Tool availability (codegraph/fallow/jq/timeout): degraded tooling is part of
+  # every review report — missing tools must be visible, not silently skipped.
+  { printf '\n### Tooling\n'; lhtask_tooling_to_md "$ROOT"; } >> "$ROOT/TODO.review.md"
   lhtask_surface_review | tee -a "$RUNLOG"
 }
 

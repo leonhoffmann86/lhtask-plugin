@@ -131,8 +131,26 @@ first and cannot be re-allowed by any layer):
 If the file exists, **merge** allow + deny rather than overwriting, and never copy entries
 containing absolute home paths.
 
-## 8. Summarize and hand off
-Print what was created/skipped, the final `lhtask.conf` values, and the next steps:
+## 8. Tooling check (MANDATORY — the chain lives on its tool use)
+The chain degrades gracefully when supporting tools are missing, but the user must be told
+EXPLICITLY, with install commands and the concrete impact:
+- **codegraph** (<https://github.com/colbymchenry/codegraph>): `command -v codegraph`; if
+  installed but `.codegraph/codegraph.db` is missing, offer to run `codegraph sync .` once
+  (the post-commit hook keeps it fresh afterwards). Missing entirely → planner/navigator/
+  reviewers run WITHOUT code-graph intelligence.
+- **fallow** (<https://docs.fallow.tools>): on PATH or `./node_modules/.bin/fallow`. Missing →
+  the deterministic gate runs without dead-code/duplication/complexity analysis; suggest
+  `npm i -g fallow` + `fallow init` (JS/TS projects).
+- **jq**, **timeout/gtimeout**: missing → degraded JSON parsing / no per-phase timeout.
+The same status appears as the `### Tooling` section in every `TODO.review.md`.
+
+## 9. Registry (opt-in)
+Ask the user whether to register this repo in `${XDG_CONFIG_HOME:-$HOME/.config}/lhtask/registry`
+(consumed by `/lhtask:update --all`). Default to NO for internal/private repos — users keep those
+out of the registry deliberately (see `docs/DISTRIBUTION.md`).
+
+## 10. Summarize and hand off
+Print what was created/skipped, the final `lhtask.conf` values, the tooling report, and the next steps:
 - Capture work with `/lhtask:lh-task "<idea>"`.
 - Commit `TODO.md` to start the chain. The implement stage runs a subagent team
   (planner → navigator → implementer → deterministic gate → reviewers, bounded by
