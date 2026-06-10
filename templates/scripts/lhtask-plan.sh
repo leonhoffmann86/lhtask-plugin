@@ -21,7 +21,9 @@ cd "$ROOT"
 # shellcheck source=scripts/lhtask-lib.sh
 . "$ROOT/scripts/lhtask-lib.sh"
 lhtask_load_config
-lhtask_model_flags plan    # stage-level override: LHTASK_MODEL_PLAN
+# Degradations of a cross-vendor plan model land here; surfaced by the next review run.
+LHTASK_MODEL_FALLBACK_LOG="$ROOT/.git/lhtask-model-fallbacks.log"
+lhtask_model_flags plan    # stage-level override: LHTASK_MODEL_PLAN (cross-vendor capable)
 
 # First commit has no parent → nothing to diff against.
 git rev-parse HEAD~1 >/dev/null 2>&1 || exit 0
@@ -69,7 +71,8 @@ echo "→ LHTask plan started (commit $SHA); live log: TODO.run.log (tail -f). I
 do_run() {
   trap 'rmdir "$LOCKDIR" 2>/dev/null || true' EXIT
   lhtask_runlog_stage "$RUNLOG" "PLAN (commit $SHA)"
-  { claude -p "$PROMPT" \
+  { env ${LHTASK_MODEL_ENV[@]+"${LHTASK_MODEL_ENV[@]}"} \
+      claude -p "$PROMPT" \
       --permission-mode acceptEdits \
       --allowed-tools Read Write Edit Glob Grep \
       ${LHTASK_MODEL_FLAGS[@]+"${LHTASK_MODEL_FLAGS[@]}"} 2>&1 || true; } | tee -a "$RUNLOG" >"$LOG"

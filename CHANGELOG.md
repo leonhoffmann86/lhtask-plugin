@@ -5,6 +5,27 @@ All notable changes to LHTask will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 2026-06-10
+
+### Added
+- Cross-vendor models per role (Phase 2): `LHTASK_MODEL_<ROLE>="openrouter:<vendor>/<model>"`
+  runs that role on a non-Claude model through an Anthropic-compatible translating
+  proxy (`LHTASK_PROXY_URL`, e.g. LiteLLM `/v1/messages` in front of OpenRouter);
+  `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN` are injected per role process only.
+  Setup guide: `docs/CROSS-VENDOR.md`
+- Graceful **and loud** degradation: proxy unconfigured/unreachable → role falls back
+  to the Claude chain; a cross-vendor reviewer whose fail-closed verdict JSON is
+  missing/unparseable gets ONE Claude retry before the blocker applies. Every
+  fallback is recorded and surfaced as ❌ under `### Model fallbacks` in
+  `TODO.review.md` → `## 🔎 Review-Findings` pointer + `AGENT_LOG.md` (+ notify) —
+  a configured-but-inactive foreign reviewer can never go unnoticed
+- Secrets stay out of the repo: machine-local `~/.config/lhtask/env` is sourced
+  after `lhtask.conf` (e.g. `LHTASK_PROXY_TOKEN`)
+- Smoke test: cross-vendor unit assertions (prefix parsing, env injection,
+  no-proxy/unreachable fallbacks + recording, forced-Claude retry, raw detection)
+
+[0.5.0]: https://github.com/leonhoffmann86/lhtask-plugin/releases/tag/v0.5.0
+
 ## [0.4.0] — 2026-06-10
 
 ### Added

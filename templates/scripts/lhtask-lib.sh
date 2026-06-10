@@ -30,6 +30,8 @@ lhtask_load_config() {
   LHTASK_MODEL_REVIEWER_CORRECTNESS=""
   LHTASK_MODEL_REVIEWER_CONVENTIONS=""
   LHTASK_MODEL_REVIEW=""
+  LHTASK_PROXY_URL=""             # Anthropic-compatible translating proxy (cross-vendor models)
+  LHTASK_PROXY_TOKEN=""           # proxy auth token — set in ~/.config/lhtask/env, NOT in the repo
   LHTASK_REVIEW_AUTONOMOUS="1"
   LHTASK_NOTIFY="0"
   # --- Subagent-team + deterministic-gate block (kept in sync with lhtask.conf) ---
@@ -46,6 +48,10 @@ lhtask_load_config() {
   LHTASK_DEV_URL="http://localhost:3000"  # stage 2 (visual reviewer)
   # shellcheck source=/dev/null
   [ -f "$LHTASK_ROOT/lhtask.conf" ] && . "$LHTASK_ROOT/lhtask.conf"
+  # Machine-local secrets/overrides (never committed): may set LHTASK_PROXY_TOKEN etc.
+  # Sourced AFTER the repo conf so secrets stay out of the repo and win over it.
+  # shellcheck source=/dev/null
+  [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/lhtask/env" ] && . "${XDG_CONFIG_HOME:-$HOME/.config}/lhtask/env"
   return 0
 }
 
@@ -97,22 +103,91 @@ lhtask_should_skip() {
   return 1
 }
 
-# Build a model flag array for headless claude calls (empty if no override).
-# Usage: lhtask_model_flags [role]; claude -p ... "${LHTASK_MODEL_FLAGS[@]}"
+# Build model flag + env arrays for a headless claude call (both empty if no override).
+# Usage: lhtask_model_flags [role]
+#        env ${LHTASK_MODEL_ENV[@]+"${LHTASK_MODEL_ENV[@]}"} claude … "${LHTASK_MODEL_FLAGS[@]}"
 # Role-aware resolution: LHTASK_MODEL_<ROLE> (role uppercased, "-" → "_", e.g.
 # reviewer-correctness → LHTASK_MODEL_REVIEWER_CORRECTNESS) → LHTASK_MODEL (global)
 # → empty (CLI default). Without a role argument it behaves exactly as before.
-# shellcheck disable=SC2034  # LHTASK_MODEL_FLAGS is consumed by the caller.
+#
+# CROSS-VENDOR: a value of the form "openrouter:<vendor>/<model>" runs the role on a
+# non-Claude model behind the Anthropic-compatible proxy LHTASK_PROXY_URL (e.g.
+# LiteLLM /v1/messages): LHTASK_MODEL_ENV gets ANTHROPIC_BASE_URL (+ AUTH_TOKEN),
+# --model carries the part after the prefix, LHTASK_MODEL_XVENDOR=1. GRACEFUL + LOUD:
+# proxy unconfigured/unreachable → fall back to the Claude chain AND record the
+# degradation via lhtask_model_fallback_note (surfaced ❌, never silent).
+# LHTASK_FORCE_CLAUDE=1 ignores the prefix (the garbled-JSON retry path; the caller
+# records the reason, so this branch stays quiet).
+# shellcheck disable=SC2034  # the LHTASK_MODEL_* results are consumed by the caller.
 lhtask_model_flags() {
-  LHTASK_MODEL_FLAGS=()
-  local role="${1:-}" var model=""
+  LHTASK_MODEL_FLAGS=(); LHTASK_MODEL_ENV=(); LHTASK_MODEL_XVENDOR=0
+  local role="${1:-}" var model="" xmodel
   if [ -n "$role" ]; then
     var="LHTASK_MODEL_$(printf '%s' "$role" | tr '[:lower:]' '[:upper:]' | tr '-' '_')"
     model="${!var:-}"
   fi
   [ -n "$model" ] || model="${LHTASK_MODEL:-}"
+  case "$model" in
+    openrouter:*)
+      xmodel="${model#openrouter:}"
+      if [ -n "${LHTASK_FORCE_CLAUDE:-}" ]; then
+        model="${LHTASK_MODEL:-}"; case "$model" in openrouter:*) model="";; esac
+      elif [ -z "${LHTASK_PROXY_URL:-}" ]; then
+        lhtask_model_fallback_note "${role:-global}" "'$xmodel' configured but LHTASK_PROXY_URL is empty"
+        model="${LHTASK_MODEL:-}"; case "$model" in openrouter:*) model="";; esac
+      elif command -v curl >/dev/null 2>&1 && ! curl -s -o /dev/null --max-time 2 "$LHTASK_PROXY_URL" 2>/dev/null; then
+        lhtask_model_fallback_note "${role:-global}" "proxy $LHTASK_PROXY_URL unreachable — '$xmodel' skipped"
+        model="${LHTASK_MODEL:-}"; case "$model" in openrouter:*) model="";; esac
+      else
+        LHTASK_MODEL_XVENDOR=1
+        LHTASK_MODEL_ENV=("ANTHROPIC_BASE_URL=$LHTASK_PROXY_URL")
+        [ -n "${LHTASK_PROXY_TOKEN:-}" ] && LHTASK_MODEL_ENV+=("ANTHROPIC_AUTH_TOKEN=$LHTASK_PROXY_TOKEN")
+        model="$xmodel"
+      fi
+      ;;
+  esac
   [ -n "$model" ] && LHTASK_MODEL_FLAGS=(--model "$model")
   return 0
+}
+
+# True (0) if the role's RAW configured model requests a cross-vendor run (before
+# any graceful fallback). Used by the implement loop's safety-net retry.
+lhtask_model_is_xvendor() {
+  local role="${1:-}" var v=""
+  if [ -n "$role" ]; then
+    var="LHTASK_MODEL_$(printf '%s' "$role" | tr '[:lower:]' '[:upper:]' | tr '-' '_')"
+    v="${!var:-}"
+  fi
+  [ -n "$v" ] || v="${LHTASK_MODEL:-}"
+  case "$v" in openrouter:*) return 0;; *) return 1;; esac
+}
+
+# Record a model degradation: a configured cross-vendor model did NOT run. Appends
+# to $LHTASK_MODEL_FALLBACK_LOG (set by the stage scripts) and echoes to stderr.
+# The log is surfaced as ❌ lines in TODO.review.md (→ 🔎 pointer + AGENT_LOG +
+# optional notify) — degradation must be VISIBLE, never silent.
+lhtask_model_fallback_note() {  # $1 = role, $2 = reason
+  local line; line="$(date '+%Y-%m-%d %H:%M') ${1}: ${2}"
+  [ -n "${LHTASK_MODEL_FALLBACK_LOG:-}" ] && printf '%s\n' "$line" >> "$LHTASK_MODEL_FALLBACK_LOG" 2>/dev/null
+  printf 'lhtask: model fallback — %s\n' "$line" >&2
+  return 0
+}
+
+# model-fallbacks.log → ❌ markdown lines for TODO.review.md.
+lhtask_model_fallbacks_to_md() {
+  local f="$1"
+  [ -s "$f" ] || return 0
+  sed 's/^/❌ model-fallback: /' "$f"
+  printf -- '- a configured cross-vendor model did NOT review this change — fix the proxy/config (lhtask.conf: LHTASK_PROXY_URL, docs/CROSS-VENDOR.md)\n'
+}
+
+# True (0) if a review sidecar holds parseable JSON with a recognizable verdict —
+# the precondition for SKIPPING the cross-vendor safety-net retry.
+lhtask_review_parseable() {
+  local f="$1"
+  [ -s "$f" ] || return 1
+  if command -v jq >/dev/null 2>&1; then jq -e . "$f" >/dev/null 2>&1 || return 1; fi
+  grep -Eq '"severity"[[:space:]]*:[[:space:]]*"(blocker|major|minor)"|"verdict"[[:space:]]*:[[:space:]]*"pass"' "$f"
 }
 
 # Human-visible run log in the repo root (gitignored): TODO.run.log. Unlike the
@@ -391,8 +466,9 @@ lhtask_surface_review() {
 # Build TODO.review.md from the structured artifacts (gate + reviews), then hand off
 # to lhtask_surface_review for the ## 🔎 / AGENT_LOG / notify surface (verbatim).
 lhtask_findings_surface() {  # $1 = gate.json ; $2.. = review-*.json files
-  local root="${ROOT:-$LHTASK_ROOT}" gate="$1" f fallow; shift
-  fallow="$(dirname "$gate")/fallow.json"   # written by lhtask-gate.sh when fallow ran
+  local root="${ROOT:-$LHTASK_ROOT}" gate="$1" f fallow fb; shift
+  fallow="$(dirname "$gate")/fallow.json"          # written by lhtask-gate.sh when fallow ran
+  fb="$(dirname "$gate")/model-fallbacks.log"      # written by lhtask_model_fallback_note
   {
     printf '> Review of %s — %s\n\n' "${SHA:-autoplan/impl}" "$(date '+%Y-%m-%d %H:%M')"
     printf '### Gate\n'
@@ -400,6 +476,10 @@ lhtask_findings_surface() {  # $1 = gate.json ; $2.. = review-*.json files
     if [ -s "$fallow" ]; then
       printf '\n### Fallow (static analysis)\n'
       lhtask_fallow_to_md "$fallow"
+    fi
+    if [ -s "$fb" ]; then
+      printf '\n### Model fallbacks (cross-vendor NOT active)\n'
+      lhtask_model_fallbacks_to_md "$fb"
     fi
     printf '\n### Reviews\n'
     for f in "$@"; do lhtask_json_findings_to_md "$f"; done

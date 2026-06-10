@@ -26,7 +26,10 @@ cd "$ROOT"
 # shellcheck source=scripts/lhtask-lib.sh
 . "$ROOT/scripts/lhtask-lib.sh"
 lhtask_load_config
-lhtask_model_flags review  # stage-level override: LHTASK_MODEL_REVIEW
+# Fresh degradation log per trigger; resolution below may append to it.
+LHTASK_MODEL_FALLBACK_LOG="$ROOT/.git/lhtask-model-fallbacks.log"
+: > "$LHTASK_MODEL_FALLBACK_LOG" 2>/dev/null || true
+lhtask_model_flags review  # stage-level override: LHTASK_MODEL_REVIEW (cross-vendor capable)
 
 git rev-parse HEAD~1 >/dev/null 2>&1 || exit 0
 command -v claude >/dev/null 2>&1 || { echo "lhtask-review: claude CLI not found, skipping." >&2; exit 0; }
@@ -86,7 +89,8 @@ do_run() {
   trap 'rmdir "$LOCKDIR" 2>/dev/null || true' EXIT
   lhtask_runlog_stage "$RUNLOG" "REVIEW (${SHA})"
   # AUTOPLAN_AGENT=1 defensively prevents any git activity from recursing.
-  { AUTOPLAN_AGENT=1 claude -p "$PROMPT" \
+  { AUTOPLAN_AGENT=1 env ${LHTASK_MODEL_ENV[@]+"${LHTASK_MODEL_ENV[@]}"} \
+      claude -p "$PROMPT" \
       --permission-mode acceptEdits \
       --allowed-tools Read Write Glob Grep Bash \
       ${LHTASK_MODEL_FLAGS[@]+"${LHTASK_MODEL_FLAGS[@]}"} 2>&1 || true; } | tee -a "$RUNLOG" >"$LOG"
@@ -102,6 +106,13 @@ do_run() {
         lhtask_fallow_to_md "$FJSON" | sed 's|\.lhtask-state/fallow\.json|.git/lhtask-fallow.json|'
       } >> "$ROOT/TODO.review.md"
     fi
+  fi
+  # Cross-vendor degradation surface: if the configured foreign review model did not
+  # run, say so LOUDLY (❌ counts into the 🔎 pointer) — never degrade silently.
+  if [ -s "$LHTASK_MODEL_FALLBACK_LOG" ]; then
+    { printf '\n### Model fallbacks (cross-vendor NOT active)\n'
+      lhtask_model_fallbacks_to_md "$LHTASK_MODEL_FALLBACK_LOG"
+    } >> "$ROOT/TODO.review.md"
   fi
   lhtask_surface_review | tee -a "$RUNLOG"
 }

@@ -19,6 +19,7 @@ echo "--- Unit: lhtask_model_flags resolution ---"
 (
   cd "$TMPDIR"
   git init -q model-unit && cd model-unit   # lib needs a git toplevel
+  export XDG_CONFIG_HOME="$PWD/.xdg"        # isolate from the user's real ~/.config/lhtask/env
   # shellcheck source=/dev/null
   . "$PLUGIN_DIR/templates/scripts/lhtask-lib.sh"
   lhtask_load_config
@@ -52,6 +53,44 @@ echo "--- Unit: lhtask_model_flags resolution ---"
   LHTASK_MODEL_PLAN="haiku"
   lhtask_model_flags plan
   assert_flags "stage name (plan)" "--model haiku"
+
+  # --- cross-vendor (openrouter: prefix) ---
+  LHTASK_MODEL_FALLBACK_LOG="$PWD/fallbacks.log"
+  LHTASK_MODEL_REVIEWER_CORRECTNESS="openrouter:openai/gpt-5"
+  # 6) prefix without proxy → graceful Claude fallback + RECORDED degradation
+  LHTASK_PROXY_URL=""
+  lhtask_model_flags reviewer-correctness 2>/dev/null
+  assert_flags "xvendor w/o proxy → Claude fallback" "--model opus"
+  grep -q "LHTASK_PROXY_URL is empty" fallbacks.log \
+    || { echo "  UNIT FAIL: fallback not recorded"; exit 1; }
+  echo "  ok:  fallback recorded (no proxy)"
+  # 7) reachable proxy (file:// satisfies the curl reachability probe) → env + model
+  LHTASK_PROXY_URL="file://$PWD/fallbacks.log"
+  LHTASK_PROXY_TOKEN="sk-test"
+  lhtask_model_flags reviewer-correctness
+  assert_flags "xvendor active → vendor model" "--model openai/gpt-5"
+  [ "${LHTASK_MODEL_XVENDOR}" = "1" ] || { echo "  UNIT FAIL: XVENDOR flag"; exit 1; }
+  [ "${LHTASK_MODEL_ENV[0]}" = "ANTHROPIC_BASE_URL=$LHTASK_PROXY_URL" ] \
+    && [ "${LHTASK_MODEL_ENV[1]}" = "ANTHROPIC_AUTH_TOKEN=sk-test" ] \
+    || { echo "  UNIT FAIL: env injection"; exit 1; }
+  echo "  ok:  env injection (base url + token)"
+  # 8) unreachable proxy → graceful fallback + recorded
+  LHTASK_PROXY_URL="http://127.0.0.1:1"
+  lhtask_model_flags reviewer-correctness 2>/dev/null
+  assert_flags "xvendor proxy unreachable → Claude fallback" "--model opus"
+  grep -q "unreachable" fallbacks.log \
+    || { echo "  UNIT FAIL: unreachable fallback not recorded"; exit 1; }
+  echo "  ok:  fallback recorded (unreachable proxy)"
+  # 9) forced Claude retry path ignores the prefix (and stays quiet)
+  LHTASK_PROXY_URL="file://$PWD/fallbacks.log"
+  LHTASK_FORCE_CLAUDE=1 lhtask_model_flags reviewer-correctness
+  assert_flags "FORCE_CLAUDE ignores prefix" "--model opus"
+  [ "${LHTASK_MODEL_XVENDOR}" = "0" ] || { echo "  UNIT FAIL: forced run must not be xvendor"; exit 1; }
+  echo "  ok:  forced Claude retry"
+  # 10) raw-config detector for the safety net
+  lhtask_model_is_xvendor reviewer-correctness || { echo "  UNIT FAIL: is_xvendor positive"; exit 1; }
+  ! lhtask_model_is_xvendor reviewer-conventions || { echo "  UNIT FAIL: is_xvendor negative"; exit 1; }
+  echo "  ok:  is_xvendor raw detection"
   echo "  model-resolution unit tests passed"
 ) || { echo "SMOKE FAIL: model resolution unit tests"; exit 1; }
 

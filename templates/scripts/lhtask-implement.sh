@@ -67,6 +67,9 @@ fi
 # (via the worktree's info/exclude) so the implementer's `git add` can never sweep them.
 STATE_DIR="$WT/.lhtask-state"
 mkdir -p "$STATE_DIR"
+# Cross-vendor degradations land here and are surfaced ❌ by lhtask_findings_surface.
+LHTASK_MODEL_FALLBACK_LOG="$STATE_DIR/model-fallbacks.log"
+export LHTASK_MODEL_FALLBACK_LOG
 EXCL="$(git -C "$WT" rev-parse --git-path info/exclude 2>/dev/null || true)"
 [ -n "$EXCL" ] && { mkdir -p "$(dirname "$EXCL")" 2>/dev/null || true; grep -qxF '.lhtask-state/' "$EXCL" 2>/dev/null || echo '.lhtask-state/' >> "$EXCL"; }
 
@@ -89,9 +92,12 @@ run_phase() {  # $1 = role, $2 = prompt → returns the claude/timeout exit code
   esac
   lhtask_runlog_stage "$RUNLOG" "IMPLEMENT/$role (branch $BR, iter ${ITER:-0})"
   # Per-role model resolution (LHTASK_MODEL_<ROLE> → LHTASK_MODEL → CLI default) —
-  # must run PER PHASE, since each role may use a different model.
+  # must run PER PHASE, since each role may use a different model. Cross-vendor roles
+  # additionally get ANTHROPIC_BASE_URL/_AUTH_TOKEN injected via `env` (per process,
+  # never exported globally — sibling roles stay on the native API).
   lhtask_model_flags "$role"
   AUTOPLAN_AGENT=1 LHTASK_ITER="${ITER:-0}" \
+    env ${LHTASK_MODEL_ENV[@]+"${LHTASK_MODEL_ENV[@]}"} \
     ${LHTASK_TIMEOUT[@]+"${LHTASK_TIMEOUT[@]}"} \
     claude -p "$prompt" \
       --append-system-prompt "$(lhtask_agent_body "$AGENTS_DIR/$role.md")" \
@@ -191,14 +197,34 @@ dead code, duplication, complexity for this change) and fold relevant findings i
 your verdict — it is part of this review.
 ACTIVE TODO item(s):
 ${ACTIVE}"
-    run_phase reviewer-correctness "${REV_BASE}
+    REV_PROMPT_CORRECTNESS="${REV_BASE}
 
-Write your verdict JSON to: .lhtask-state/review-correctness.json" \
+Write your verdict JSON to: .lhtask-state/review-correctness.json"
+    REV_PROMPT_CONVENTIONS="${REV_BASE}
+
+Write your verdict JSON to: .lhtask-state/review-conventions.json"
+    run_phase reviewer-correctness "$REV_PROMPT_CORRECTNESS" \
       || lhtask_runlog_note "$RUNLOG" "reviewer-correctness phase errored (iter $ITER)"
-    run_phase reviewer-conventions "${REV_BASE}
-
-Write your verdict JSON to: .lhtask-state/review-conventions.json" \
+    run_phase reviewer-conventions "$REV_PROMPT_CONVENTIONS" \
       || lhtask_runlog_note "$RUNLOG" "reviewer-conventions phase errored (iter $ITER)"
+
+    # Cross-vendor SAFETY NET: a foreign reviewer whose verdict sidecar is missing or
+    # unparseable gets ONE retry on the Claude chain before fail-closed kicks in — a
+    # JSON-untrue foreign model degrades to a Claude review instead of a permanent
+    # loopback. The degradation is recorded (→ ❌ surface) so it is fixed, not hidden.
+    for rrole in reviewer-correctness reviewer-conventions; do
+      rfile="$STATE_DIR/review-${rrole#reviewer-}.json"
+      if lhtask_model_is_xvendor "$rrole" && ! lhtask_review_parseable "$rfile"; then
+        lhtask_model_fallback_note "$rrole" "cross-vendor verdict missing/unparseable (iter $ITER) — one-shot Claude retry"
+        case "$rrole" in
+          reviewer-correctness) LHTASK_FORCE_CLAUDE=1 run_phase "$rrole" "$REV_PROMPT_CORRECTNESS" || true ;;
+          reviewer-conventions) LHTASK_FORCE_CLAUDE=1 run_phase "$rrole" "$REV_PROMPT_CONVENTIONS" || true ;;
+        esac
+        # Var-prefix before a FUNCTION call may persist in some bash modes — make
+        # sure the force never leaks into later phases/iterations.
+        unset LHTASK_FORCE_CLAUDE
+      fi
+    done
     SEV="$(lhtask_review_max_severity "$STATE_DIR/review-correctness.json" "$STATE_DIR/review-conventions.json")"
     if [ "$SEV" = blocker ] || [ "$SEV" = major ]; then
       lhtask_runlog_note "$RUNLOG" "review loopback (iter $ITER): max severity ${SEV}"
