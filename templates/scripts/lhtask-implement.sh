@@ -28,8 +28,7 @@ cd "$ROOT"
 # shellcheck source=scripts/lhtask-lib.sh
 . "$ROOT/scripts/lhtask-lib.sh"
 lhtask_load_config
-lhtask_model_flags
-lhtask_mcp_flags
+lhtask_mcp_flags   # model flags are resolved PER ROLE inside run_phase
 
 [ -f "$ROOT/.git/autoplan.disabled" ] && exit 0
 command -v claude >/dev/null 2>&1 || { echo "lhtask-implement: claude CLI not found, skipping." >&2; exit 0; }
@@ -89,6 +88,9 @@ run_phase() {  # $1 = role, $2 = prompt → returns the claude/timeout exit code
       perm=(--permission-mode dontAsk --allowed-tools "Read,Grep,Glob,Write,Bash(git show *),Bash(git log *),Bash(git diff *),mcp__codegraph__*") ;;
   esac
   lhtask_runlog_stage "$RUNLOG" "IMPLEMENT/$role (branch $BR, iter ${ITER:-0})"
+  # Per-role model resolution (LHTASK_MODEL_<ROLE> → LHTASK_MODEL → CLI default) —
+  # must run PER PHASE, since each role may use a different model.
+  lhtask_model_flags "$role"
   AUTOPLAN_AGENT=1 LHTASK_ITER="${ITER:-0}" \
     ${LHTASK_TIMEOUT[@]+"${LHTASK_TIMEOUT[@]}"} \
     claude -p "$prompt" \

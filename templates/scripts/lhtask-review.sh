@@ -26,7 +26,7 @@ cd "$ROOT"
 # shellcheck source=scripts/lhtask-lib.sh
 . "$ROOT/scripts/lhtask-lib.sh"
 lhtask_load_config
-lhtask_model_flags
+lhtask_model_flags review  # stage-level override: LHTASK_MODEL_REVIEW
 
 git rev-parse HEAD~1 >/dev/null 2>&1 || exit 0
 command -v claude >/dev/null 2>&1 || { echo "lhtask-review: claude CLI not found, skipping." >&2; exit 0; }

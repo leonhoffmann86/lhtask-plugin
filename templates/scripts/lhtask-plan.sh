@@ -21,7 +21,7 @@ cd "$ROOT"
 # shellcheck source=scripts/lhtask-lib.sh
 . "$ROOT/scripts/lhtask-lib.sh"
 lhtask_load_config
-lhtask_model_flags
+lhtask_model_flags plan    # stage-level override: LHTASK_MODEL_PLAN
 
 # First commit has no parent → nothing to diff against.
 git rev-parse HEAD~1 >/dev/null 2>&1 || exit 0

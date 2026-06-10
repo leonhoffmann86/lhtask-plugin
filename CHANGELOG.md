@@ -5,6 +5,27 @@ All notable changes to LHTask will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-06-10
+
+### Added
+- Per-role model configuration for the headless chain (Claude family): new optional
+  conf keys `LHTASK_MODEL_PLAN`, `LHTASK_MODEL_PLANNER`, `LHTASK_MODEL_NAVIGATOR`,
+  `LHTASK_MODEL_IMPLEMENTER`, `LHTASK_MODEL_REVIEWER_CORRECTNESS`,
+  `LHTASK_MODEL_REVIEWER_CONVENTIONS`, `LHTASK_MODEL_REVIEW` — so implementer and
+  reviewers can run on different models (no shared blind spots)
+- `lhtask_model_flags [role]` resolves role-specific → `LHTASK_MODEL` (global) →
+  empty (CLI default); role names map via uppercase + `-`→`_`. `run_phase` resolves
+  per phase; the plan/review stages pass their stage names
+- Smoke test gained a claude-free unit section covering the resolution chain
+  (role beats global, fallback, name mapping)
+
+### Unchanged by design
+- Backwards compatible: without the new keys behaviour is identical to before.
+  Agent frontmatter `model:` stays interactive-only — `lhtask.conf` remains the
+  single source of truth for headless model choice
+
+[0.4.0]: https://github.com/leonhoffmann86/lhtask-plugin/releases/tag/v0.4.0
+
 ## [0.3.3] — 2026-06-10
 
 ### Fixed

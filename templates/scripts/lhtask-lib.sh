@@ -22,6 +22,14 @@ lhtask_load_config() {
   LHTASK_VENV=""
   LHTASK_CODEGRAPH="auto"
   LHTASK_MODEL=""
+  # Per-role model overrides (empty = fall back to LHTASK_MODEL → CLI default).
+  LHTASK_MODEL_PLAN=""
+  LHTASK_MODEL_PLANNER=""
+  LHTASK_MODEL_NAVIGATOR=""
+  LHTASK_MODEL_IMPLEMENTER=""
+  LHTASK_MODEL_REVIEWER_CORRECTNESS=""
+  LHTASK_MODEL_REVIEWER_CONVENTIONS=""
+  LHTASK_MODEL_REVIEW=""
   LHTASK_REVIEW_AUTONOMOUS="1"
   LHTASK_NOTIFY="0"
   # --- Subagent-team + deterministic-gate block (kept in sync with lhtask.conf) ---
@@ -90,11 +98,20 @@ lhtask_should_skip() {
 }
 
 # Build a model flag array for headless claude calls (empty if no override).
-# Usage: lhtask_model_flags; claude -p ... "${LHTASK_MODEL_FLAGS[@]}"
+# Usage: lhtask_model_flags [role]; claude -p ... "${LHTASK_MODEL_FLAGS[@]}"
+# Role-aware resolution: LHTASK_MODEL_<ROLE> (role uppercased, "-" → "_", e.g.
+# reviewer-correctness → LHTASK_MODEL_REVIEWER_CORRECTNESS) → LHTASK_MODEL (global)
+# → empty (CLI default). Without a role argument it behaves exactly as before.
 # shellcheck disable=SC2034  # LHTASK_MODEL_FLAGS is consumed by the caller.
 lhtask_model_flags() {
   LHTASK_MODEL_FLAGS=()
-  [ -n "${LHTASK_MODEL:-}" ] && LHTASK_MODEL_FLAGS=(--model "$LHTASK_MODEL")
+  local role="${1:-}" var model=""
+  if [ -n "$role" ]; then
+    var="LHTASK_MODEL_$(printf '%s' "$role" | tr '[:lower:]' '[:upper:]' | tr '-' '_')"
+    model="${!var:-}"
+  fi
+  [ -n "$model" ] || model="${LHTASK_MODEL:-}"
+  [ -n "$model" ] && LHTASK_MODEL_FLAGS=(--model "$model")
   return 0
 }
 
