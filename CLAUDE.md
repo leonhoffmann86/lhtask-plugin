@@ -21,7 +21,9 @@ build, lint, or test toolchain. The "code" is:
   install channel, also for maintainers (`--plugin-dir` is test-only, e.g. the smoke test); data
   flows one-way plugin → consumer; updates are pull-based (`/lhtask:update` run *inside* the
   consumer repo); the registry (`~/.config/lhtask/registry`) is opt-in — never reach into
-  consumer repos from plugin-dev sessions.
+  consumer repos from plugin-dev sessions,
+- `docs/CROSS-VENDOR.md` — setup guide for running individual roles on **non-Claude models**
+  (the `openrouter:` prefix + translating proxy, see the configuration section below).
 
 Critical mental model: the scripts in `templates/scripts/` and `templates/githooks/` **do not run
 here**. They are parameterized files that get copied (`cp -n`) into another repo by the `bootstrap`
@@ -101,6 +103,12 @@ When changing any stage script, preserve these load-bearing invariants:
   unparseable review sidecar as `blocker`. Keep that direction — a garbled report must loop back,
   not pass. (Exception by design: `lhtask_fallow_to_md` is fail-OPEN — a missing `fallow.json`
   just means fallow didn't run; the gate already enforced the verdict where it matters.)
+- **Graceful but LOUD model fallback:** a configured cross-vendor model that does not run falls
+  back to the Claude chain AND is recorded via `lhtask_model_fallback_note` — surfaced as ❌ under
+  `### Model fallbacks` in `TODO.review.md` (→ 🔎 pointer + `AGENT_LOG`). Causes: proxy
+  unconfigured/unreachable (pre-flight `curl` probe), or a cross-vendor reviewer's verdict JSON
+  missing/unparseable — that one gets ONE forced-Claude retry (`LHTASK_FORCE_CLAUDE=1`, unset
+  right after) before fail-closed applies. Degradation is acceptable; *silent* degradation is not.
 
 ## Configuration is the single source of truth
 
@@ -110,7 +118,13 @@ constitution files, impl branch, venv to symlink, codegraph mode, the model bloc
 REVIEWER_CORRECTNESS,REVIEWER_CONVENTIONS,REVIEW}`, resolved per phase by `lhtask_model_flags [role]`
 (role-specific → `LHTASK_MODEL` → CLI default; role names map uppercase with `-`→`_`, e.g.
 `reviewer-correctness` → `LHTASK_MODEL_REVIEWER_CORRECTNESS`) so implementer and reviewers can run
-on different models — autonomous-review
+on different models. A per-role value of the form `openrouter:<vendor>/<model>` runs that role
+**cross-vendor** behind the Anthropic-compatible translating proxy `LHTASK_PROXY_URL` (e.g. LiteLLM
+`/v1/messages`; setup: `docs/CROSS-VENDOR.md`) — `lhtask_model_flags` injects
+`ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN` per role *process* only, sibling roles stay on the
+native API. `LHTASK_PROXY_TOKEN` and other machine-local secrets belong in `~/.config/lhtask/env`
+(never the committed conf), which `lhtask_load_config` sources *after* the repo's `lhtask.conf` so
+it wins. The conf further holds the autonomous-review
 and notify toggles, plus the subagent/gate block: `LHTASK_STACK`, the four `LHTASK_GATE_*` commands,
 the fallow keys `LHTASK_FALLOW` (`auto`/`off`) and `LHTASK_FALLOW_CMD` (full command override,
 `{base}` placeholder), `LHTASK_MAX_ITER`, `LHTASK_PHASE_TIMEOUT`, and the stage-2 visual-reviewer keys
@@ -181,8 +195,9 @@ silently forgotten. If you add a real exclusion, change it in *both* places.
 ## Testing changes to the chain
 
 `tests/smoke-test.sh` is the end-to-end smoke test: it starts with a claude-free unit section
-covering the `lhtask_model_flags` resolution chain (role beats global, fallback, name mapping),
-then bootstraps the plugin into a throwaway repo
+covering the `lhtask_model_flags` resolution chain (role beats global, fallback, name mapping) and
+its cross-vendor branch (prefix parsing, env injection, no-proxy/unreachable fallback + recording,
+forced-Claude retry, `lhtask_model_is_xvendor`), then bootstraps the plugin into a throwaway repo
 (`claude -p --plugin-dir … "/lhtask:bootstrap"`), commits a `TODO.md` task, runs the chain with
 `LHTASK_FOREGROUND=1`, and asserts `TODO.run.log` was produced. The E2E part needs the `claude`
 CLI, so it is not run in CI. To debug a change manually, bootstrap into a throwaway git repo and use:

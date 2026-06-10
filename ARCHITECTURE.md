@@ -250,7 +250,7 @@ sequenceDiagram
             end
         end
     end
-    Note right of C: jede Rolle läuft mit<br/>AUTOPLAN_AGENT=1 +<br/>Timeout (LHTASK_PHASE_TIMEOUT)<br/>+ eigenem Modell (LHTASK_MODEL_&lt;ROLLE&gt;<br/>→ LHTASK_MODEL → CLI-Default)
+    Note right of C: jede Rolle läuft mit<br/>AUTOPLAN_AGENT=1 +<br/>Timeout (LHTASK_PHASE_TIMEOUT)<br/>+ eigenem Modell (LHTASK_MODEL_&lt;ROLLE&gt;<br/>→ LHTASK_MODEL → CLI-Default;<br/>openrouter:-Prefix → Proxy-Env pro Prozess)
     I->>I: lhtask_findings_surface: TODO.review.md (Ampel)<br/>+ ❌→🔎 in TODO.md + AGENT_LOG
     I->>I: worktree entfernen (Branch bleibt!)<br/>nicht konvergiert → Eskalations-Note
     deactivate I
@@ -273,6 +273,16 @@ sequenceDiagram
 > landet als `.lhtask-state/fallow.json` neben `gate.json`; Loopback-Prompt und Reviewer lesen ihn
 > mit. Graceful: nicht installiert → skip, Laufzeit-/Config-Fehler (exit 2) → skip, nie per `npx`
 > nachgeladen (der Gate bleibt offline-deterministisch). Steuerung: `LHTASK_FALLOW` / `LHTASK_FALLOW_CMD`.
+>
+> **Cross-Vendor-Modelle** ([`docs/CROSS-VENDOR.md`](docs/CROSS-VENDOR.md)): ein Rollen-Modell der
+> Form `openrouter:<vendor>/<model>` läuft auf einem **Nicht-Claude-Modell** hinter dem übersetzenden
+> Proxy `LHTASK_PROXY_URL` (z. B. LiteLLM `/v1/messages` vor OpenRouter) — `ANTHROPIC_BASE_URL`/
+> `ANTHROPIC_AUTH_TOKEN` werden **pro Rollen-Prozess** injiziert, Geschwister-Rollen bleiben auf der
+> nativen API. Graceful **und laut**: Proxy unkonfiguriert/unerreichbar → Claude-Fallback; ein
+> Cross-Vendor-Reviewer mit fehlendem/kaputtem Verdict-JSON bekommt **einen** Claude-Retry
+> (`LHTASK_FORCE_CLAUDE=1`), bevor fail-closed greift. Jede Degradation wird protokolliert
+> (`lhtask_model_fallback_note`) und als ❌ unter `### Model fallbacks` in `TODO.review.md`
+> sichtbar (→ 🔎-Pointer + AGENT_LOG) — nie still.
 
 ---
 
@@ -481,14 +491,17 @@ Stellen dupliziert, die synchron bleiben müssen.
 ```mermaid
 flowchart LR
     CONF["lhtask.conf<br/>(Ziel-Repo)"]
+    ENV["~/.config/lhtask/env<br/>(maschinen-lokal, Secrets —<br/>z. B. LHTASK_PROXY_TOKEN)"]
     LIB["lhtask_load_config<br/>in lhtask-lib.sh"]
     HOOK["inline-Defaults<br/>in post-commit"]
 
     CONF -- "voll gesourct von allen Stages" --> LIB
+    ENV -- "NACH lhtask.conf gesourct<br/>(gewinnt; nie committet)" --> LIB
     CONF -- "nur REVIEW_DIRS + CODEGRAPH<br/>vor dem lib-source" --> HOOK
     LIB -. "müssen synchron sein" .-> HOOK
 
     style CONF fill:#eef2ff,stroke:#6366f1
+    style ENV fill:#fffbeb,stroke:#d97706
 ```
 
 | Key | Bedeutung |
@@ -500,7 +513,9 @@ flowchart LR
 | `LHTASK_VENV` | venv, das in den worktree gesymlinkt wird (Python); leer für Node/Go |
 | `LHTASK_CODEGRAPH` | `auto` \| `on` \| `off` |
 | `LHTASK_MODEL` | Globaler Modell-Override für headless-Läufe (leer = CLI-Default) |
-| `LHTASK_MODEL_PLAN` / `_PLANNER` / `_NAVIGATOR` / `_IMPLEMENTER` / `_REVIEWER_CORRECTNESS` / `_REVIEWER_CONVENTIONS` / `_REVIEW` | Modell pro Rolle/Stage; Auflösung rollenspezifisch → `LHTASK_MODEL` → CLI-Default (`lhtask_model_flags [rolle]`, pro Phase in `run_phase` aufgelöst) — so können Implementer und Reviewer auf **verschiedenen** Modellen laufen (keine gemeinsamen Blind Spots) |
+| `LHTASK_MODEL_PLAN` / `_PLANNER` / `_NAVIGATOR` / `_IMPLEMENTER` / `_REVIEWER_CORRECTNESS` / `_REVIEWER_CONVENTIONS` / `_REVIEW` | Modell pro Rolle/Stage; Auflösung rollenspezifisch → `LHTASK_MODEL` → CLI-Default (`lhtask_model_flags [rolle]`, pro Phase in `run_phase` aufgelöst) — so können Implementer und Reviewer auf **verschiedenen** Modellen laufen (keine gemeinsamen Blind Spots). Ein Wert `openrouter:<vendor>/<model>` läuft die Rolle **cross-vendor** über den Proxy ([`docs/CROSS-VENDOR.md`](docs/CROSS-VENDOR.md)) |
+| `LHTASK_PROXY_URL` | Anthropic-kompatibler übersetzender Proxy für `openrouter:`-Modelle (z. B. LiteLLM `/v1/messages`); leer/unerreichbar → Claude-Fallback, **laut** protokolliert (❌ `### Model fallbacks`) |
+| `LHTASK_PROXY_TOKEN` | Auth-Token für den Proxy — **nicht** ins committete Conf: in `~/.config/lhtask/env` setzen (nach `lhtask.conf` gesourct, gewinnt) |
 | `LHTASK_REVIEW_AUTONOMOUS` | `1` = In-Loop-Reviewer in der Implement-Schleife (`0` = Gate-only) |
 | `LHTASK_NOTIFY` | `1` = Desktop-Notification bei Review-Ende |
 | `LHTASK_STACK` | Stack für den Gate: `auto` (Marker-Dateien) \| `nextjs` \| `react` \| `node` \| `python` \| `php` \| `go` \| `rust` |
