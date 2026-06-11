@@ -46,8 +46,10 @@ When bootstrapped into a repo, `templates/githooks/post-commit` routes each comm
 
 - commit changed `TODO.md` → **`lhtask-plan.sh`** (writes `TODO.autoplan.md`) → chains
   **`lhtask-implement.sh`** in the same detached run. The plan stage exits 0 *without* a claude
-  run when no active `- [ ]` item remains after `lhtask_strip_skipped` (e.g. the commit of an
-  applied/merged chain result that only removed items).
+  run when no active checkbox item remains after `lhtask_strip_skipped` — the guard is
+  deliberately tolerant (`- [ ]`, `* [ ]` and bare `[ ]` all count; a false "nothing to do"
+  silently blocks real work, which is worse than one idle run) — e.g. the commit of an
+  applied/merged chain result that only removed items.
 - commit changed any `LHTASK_REVIEW_DIRS/` → **`lhtask-review.sh`** (writes `TODO.review.md`,
   report-only; for single-commit targets it also runs fallow and appends a `### Fallow` section,
   report at `.git/lhtask-fallow.json`; every report ends with a `### Tooling` section).
@@ -235,8 +237,9 @@ forced-Claude retry, `lhtask_model_is_xvendor`) plus the tooling surface (`lhtas
 reports every supporting tool; `off` → neutral note; conditional curl/notifier lines; missing-tool
 gate skips rendered as ⚠️ with config hint), the delivery helper (`lhtask_apply_impl`: happy path
 stages without committing and keeps the branch; dirty overlap and HEAD-moved fall back with a
-reason and stage nothing; unrelated dirty files don't block) and the plan idle-guard pattern,
-then bootstraps the plugin into a throwaway repo
+reason and stage nothing; unrelated dirty files don't block) and the plan idle-guard pattern
+(dashed and bare checkbox items both count as active), then bootstraps the plugin into a
+throwaway repo
 (`claude -p --plugin-dir … "/lhtask:bootstrap"`), commits a `TODO.md` task, runs the chain with
 `LHTASK_FOREGROUND=1`, and asserts `TODO.run.log` was produced. The E2E part needs the `claude`
 CLI, so it is not run in CI. To debug a change manually, bootstrap into a throwaway git repo and use:

@@ -197,7 +197,9 @@ flowchart TB
 > `review_re="^(${LHTASK_REVIEW_DIRS// /|})/"` → aus `"src tests"` wird `^(src|tests)/`.
 >
 > Die Plan-Stage steigt zusätzlich sauber aus (ohne claude-Lauf), wenn nach
-> `lhtask_strip_skipped` **kein aktives `- [ ]`-Item** übrig ist — z. B. beim Commit eines
+> `lhtask_strip_skipped` **kein aktives Checkbox-Item** übrig ist — der Guard ist bewusst
+> tolerant: `- [ ]`, `* [ ]` und nacktes `[ ]` zählen alle (ein falsches „nichts zu tun"
+> blockiert still echte Arbeit — schlimmer als ein Leerlauf). Beispiel: der Commit eines
 > applied/gemergten Ketten-Ergebnisses, dessen `TODO.md`-Änderung nur Items entfernt hat.
 
 ---
