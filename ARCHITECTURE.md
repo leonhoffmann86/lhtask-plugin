@@ -78,7 +78,9 @@ flowchart LR
 > Fallback auf die installierte Marketplace-Cache-Kopie — ein Dev-Checkout wird **nie** als
 > Template-Quelle akzeptiert (ohne Installation stoppen sie mit der Install-Anweisung).
 > Daten fließen einbahnig Plugin → Consumer; Updates sind pull-basiert (`/lhtask:update`
-> im Ziel-Repo).
+> im Ziel-Repo). Die Einbahnstraße gilt in beide Richtungen: Sessions im Consumer-Repo
+> schreiben **nie** ins Plugin-Repo — bei einem Fund die vendored Kopie lokal fixen und
+> den Befund *melden*, damit die Änderung plugin-seitig reviewt und released wird.
 
 ---
 

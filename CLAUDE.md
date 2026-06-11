@@ -22,7 +22,9 @@ build, lint, or test toolchain. The "code" is:
   flows one-way plugin → consumer; updates are pull-based (`/lhtask:update` run *inside* the
   consumer repo); the registry (`~/.config/lhtask/registry`) is opt-in — `bootstrap` asks before
   registering, `update` is consume-only and never self-registers; never reach into
-  consumer repos from plugin-dev sessions,
+  consumer repos from plugin-dev sessions, and the reverse holds too: sessions running in a
+  consumer repo never write into this plugin repo — fix the vendored copy locally and *report*
+  the finding for a reviewed plugin-side release,
 - `docs/CROSS-VENDOR.md` — setup guide for running individual roles on **non-Claude models**
   (the `openrouter:` prefix + translating proxy, see the configuration section below).
 
@@ -211,7 +213,7 @@ This repo has no build toolchain, but a small `Makefile` wraps the setup + doc +
 
 CI (`.github/workflows/ci.yml`) runs on push/PR to `main`: it validates the JSON manifests
 (`.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`) and runs `shellcheck` +
-`bash -n` over the template scripts.
+`bash -n` over the template scripts and this repo's own `scripts/`.
 
 `.githooks/pre-push` keeps those docs in sync: when a push changes a **source** file it regenerates
 the docs, commits them, and pushes that commit along (one `git push`, docs included). It is
