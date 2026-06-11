@@ -78,6 +78,10 @@ printf '> ⏳ LHTask plan running since %s (commit %s) … result appears here w
 echo "→ LHTask plan started (commit $SHA); live log: TODO.run.log (tail -f). Implement on branch ${LHTASK_IMPL_BRANCH} (~minutes)."
 
 # Plan, then chain implement; release lock on exit. Whitelisted read/write tools.
+lhtask_stream_setup   # live tool-call trace (jq-gated)
+# shellcheck disable=SC2034  # consumed by lhtask_stream_trace (sourced lib).
+LHTASK_TRACE_ROLE="plan"
+
 do_run() {
   trap 'rmdir "$LOCKDIR" 2>/dev/null || true' EXIT
   lhtask_runlog_stage "$RUNLOG" "PLAN (commit $SHA)"
@@ -85,7 +89,9 @@ do_run() {
       claude -p "$PROMPT" \
       --permission-mode acceptEdits \
       --allowed-tools Read Write Edit Glob Grep \
-      ${LHTASK_MODEL_FLAGS[@]+"${LHTASK_MODEL_FLAGS[@]}"} 2>&1 || true; } | tee -a "$RUNLOG" >"$LOG"
+      ${LHTASK_MODEL_FLAGS[@]+"${LHTASK_MODEL_FLAGS[@]}"} \
+      ${LHTASK_STREAM_FLAGS[@]+"${LHTASK_STREAM_FLAGS[@]}"} 2>&1 || true; } \
+    | lhtask_stream_trace | tee -a "$RUNLOG" >"$LOG"
   lhtask_runlog_note "$RUNLOG" "Plan written → TODO.autoplan.md. Starting implementation …"
   # STAGE 2: implement the freshly planned items (own lock, own log; tees into RUNLOG itself).
   "$ROOT/scripts/lhtask-implement.sh" >>"$LOG" 2>&1 || true

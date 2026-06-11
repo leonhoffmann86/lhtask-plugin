@@ -85,6 +85,10 @@ echo "→ LHTask review started (${SHA}); report in TODO.review.md (~1–2 min).
 # lhtask_surface_review now lives in lhtask-lib.sh (shared with lhtask-implement.sh).
 # It reads $ROOT/TODO.review.md and uses $SHA — both set above — so behaviour is unchanged.
 
+lhtask_stream_setup   # live tool-call trace (jq-gated)
+# shellcheck disable=SC2034  # consumed by lhtask_stream_trace (sourced lib).
+LHTASK_TRACE_ROLE="review"
+
 do_run() {
   trap 'rmdir "$LOCKDIR" 2>/dev/null || true' EXIT
   lhtask_runlog_stage "$RUNLOG" "REVIEW (${SHA})"
@@ -93,7 +97,9 @@ do_run() {
       claude -p "$PROMPT" \
       --permission-mode acceptEdits \
       --allowed-tools Read Write Glob Grep Bash \
-      ${LHTASK_MODEL_FLAGS[@]+"${LHTASK_MODEL_FLAGS[@]}"} 2>&1 || true; } | tee -a "$RUNLOG" >"$LOG"
+      ${LHTASK_MODEL_FLAGS[@]+"${LHTASK_MODEL_FLAGS[@]}"} \
+      ${LHTASK_STREAM_FLAGS[@]+"${LHTASK_STREAM_FLAGS[@]}"} 2>&1 || true; } \
+    | lhtask_stream_trace | tee -a "$RUNLOG" >"$LOG"
   # Fallow static analysis (dead code / duplication / complexity) — part of every
   # review. Appended BEFORE the surface so its ❌ counts toward the 🔎 pointer.
   # Exit 1 (findings) is data, not an error; no fallow installed → no section.

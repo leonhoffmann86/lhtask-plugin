@@ -5,6 +5,20 @@ All notable changes to LHTask will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] — 2026-06-11
+
+### Added
+- **Live activity trace**: every headless phase (plan, all loop roles, standalone
+  review) streams its tool calls into `TODO.run.log` as terse lines
+  (`⚙ implementer → Edit: app/x.py`, `✔ implementer done — 23 turns: …`) via
+  `claude -p --output-format stream-json` + a jq renderer — `tail -f TODO.run.log`
+  is now a real-time status view instead of staying silent for whole phases
+  ("hung or working?"). Non-JSON stderr lines (real errors) stay visible verbatim.
+  `LHTASK_STREAM="auto"` (default; requires jq — without jq or with `off` the
+  behaviour is exactly as before), verified end-to-end against the live CLI
+
+[0.9.0]: https://github.com/leonhoffmann86/lhtask-plugin/releases/tag/v0.9.0
+
 ## [0.8.2] — 2026-06-11
 
 ### Fixed

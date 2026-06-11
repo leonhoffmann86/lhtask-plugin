@@ -45,6 +45,7 @@ lhtask_load_config() {
   LHTASK_FALLOW_CMD=""           # empty → built-in `fallow audit` default ({base} placeholder)
   LHTASK_MAX_ITER="3"            # bounded implement↔gate↔review loop (convergence guarantee)
   LHTASK_PHASE_TIMEOUT="600"     # per-phase `claude -p` timeout in seconds (bounds lock hold)
+  LHTASK_STREAM="auto"           # live tool-call trace in TODO.run.log: auto (needs jq) | off
   LHTASK_VISUAL_MAX_DIFF_RATIO="0.02"   # stage 2 (visual reviewer)
   LHTASK_DEV_URL="http://localhost:3000"  # stage 2 (visual reviewer)
   # shellcheck source=/dev/null
@@ -211,7 +212,7 @@ lhtask_tooling_to_md() {  # $1 = repo root (default: $ROOT/$LHTASK_ROOT)
   if command -v jq >/dev/null 2>&1; then
     printf '✅ jq: present\n'
   else
-    printf '⚠️ jq: missing — JSON verdicts fall back to grep parsing (brew install jq)\n'
+    printf '⚠️ jq: missing — JSON verdicts fall back to grep parsing AND the run log loses the live activity trace (brew install jq)\n'
   fi
   if command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; then
     printf '✅ timeout: present\n'
@@ -410,6 +411,41 @@ lhtask_timeout_cmd() {
   elif command -v gtimeout >/dev/null 2>&1; then LHTASK_TIMEOUT=(gtimeout "$t")
   fi
   return 0
+}
+
+# Live activity trace: decide whether headless phases stream their tool calls.
+# Sets LHTASK_STREAM_FLAGS (extra claude flags) and LHTASK_STREAM_ACTIVE (consumed
+# by lhtask_stream_trace). Streaming needs jq to render the NDJSON events; without
+# jq (or LHTASK_STREAM=off) everything behaves exactly as before — the phase is
+# silent until it finishes. The per-phase timeout still bounds every run.
+# shellcheck disable=SC2034  # results are consumed by the stage scripts.
+lhtask_stream_setup() {
+  LHTASK_STREAM_FLAGS=(); LHTASK_STREAM_ACTIVE=""
+  if [ "${LHTASK_STREAM:-auto}" != off ] && command -v jq >/dev/null 2>&1; then
+    LHTASK_STREAM_FLAGS=(--output-format stream-json --verbose)
+    LHTASK_STREAM_ACTIVE=1
+  fi
+  return 0
+}
+
+# Convert `claude -p --output-format stream-json` NDJSON into terse LIVE activity
+# lines — without this the run log is silent for a whole phase ("hung or working?").
+# Inactive (no jq / LHTASK_STREAM=off) → pure passthrough. Non-JSON lines (stderr,
+# e.g. real errors) stay visible verbatim; uninteresting events are dropped.
+lhtask_stream_trace() {  # stdin → stdout; role label via $LHTASK_TRACE_ROLE
+  if [ -z "${LHTASK_STREAM_ACTIVE:-}" ]; then cat; return 0; fi
+  jq -rR --unbuffered --arg role "${LHTASK_TRACE_ROLE:-agent}" '
+    (fromjson? // null) as $e
+    | if $e == null then .
+      elif $e.type == "assistant" then
+        ($e.message.content[]? | select(.type == "tool_use")
+          | "  ⚙ \($role) → \(.name): " +
+            ((.input.file_path // .input.command // .input.pattern // .input.description // "")
+             | tostring | gsub("\n"; " ") | .[0:110]))
+      elif $e.type == "result" then
+        "  ✔ \($role) done — \(($e.num_turns // "?") | tostring) turns: " +
+        (($e.result // "") | tostring | gsub("\n"; " ") | .[0:200])
+      else empty end' 2>/dev/null || cat
 }
 
 # Hard deny-rules for every headless role, as a --settings JSON string. Deny is

@@ -79,6 +79,7 @@ EXCL="$(git -C "$WT" rev-parse --git-path info/exclude 2>/dev/null || true)"
 AGENTS_DIR="$ROOT/.claude/agents"
 DENY_JSON="$(lhtask_deny_settings)"
 lhtask_timeout_cmd
+lhtask_stream_setup   # live tool-call trace flags (jq-gated; LHTASK_STREAM=off disables)
 
 # One headless `claude -p` per role. AUTOPLAN_AGENT=1 is set HERE (never per call-site)
 # so no role can recurse the post-commit hook. Per-role permission flags + the hard deny
@@ -99,6 +100,12 @@ run_phase() {  # $1 = role, $2 = prompt → returns the claude/timeout exit code
   # additionally get ANTHROPIC_BASE_URL/_AUTH_TOKEN injected via `env` (per process,
   # never exported globally — sibling roles stay on the native API).
   lhtask_model_flags "$role"
+  # Live trace: with jq the phase streams every tool call into the run log
+  # (lhtask_stream_trace renders the NDJSON); `tail -f TODO.run.log` = live status.
+  # NOTE: the trace filter runs in a pipeline subshell — it reads the role from a
+  # SHELL variable, not from the env prefix of the claude process.
+  # shellcheck disable=SC2034  # consumed by lhtask_stream_trace (sourced lib).
+  local LHTASK_TRACE_ROLE="$role"
   AUTOPLAN_AGENT=1 LHTASK_ITER="${ITER:-0}" \
     env ${LHTASK_MODEL_ENV[@]+"${LHTASK_MODEL_ENV[@]}"} \
     ${LHTASK_TIMEOUT[@]+"${LHTASK_TIMEOUT[@]}"} \
@@ -108,7 +115,8 @@ run_phase() {  # $1 = role, $2 = prompt → returns the claude/timeout exit code
       --settings "$DENY_JSON" \
       ${LHTASK_MCP_FLAGS[@]+"${LHTASK_MCP_FLAGS[@]}"} \
       ${LHTASK_MODEL_FLAGS[@]+"${LHTASK_MODEL_FLAGS[@]}"} \
-      2>&1 | tee -a "$RUNLOG" >>"$LOG"
+      ${LHTASK_STREAM_FLAGS[@]+"${LHTASK_STREAM_FLAGS[@]}"} \
+      2>&1 | lhtask_stream_trace | tee -a "$RUNLOG" >>"$LOG"
 }
 
 cd "$WT"

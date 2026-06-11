@@ -203,6 +203,32 @@ EOF
       || { echo "  UNIT FAIL: line-leading ❌ did not raise the 🔎 pointer"; exit 1; }
     echo "  ok:  traffic light counts line-leading markers only"
   ) || exit 1
+
+  # --- live stream trace: NDJSON → terse activity lines; off/no-jq → passthrough ---
+  LHTASK_STREAM="auto"; lhtask_stream_setup
+  [ -n "$LHTASK_STREAM_ACTIVE" ] && [ "${LHTASK_STREAM_FLAGS[0]:-}" = "--output-format" ] \
+    || { echo "  UNIT FAIL: stream setup (auto + jq) inactive"; exit 1; }
+  TRACE_OUT="$(printf '%s\n' \
+    '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"app/x.py"}}]}}' \
+    'plain stderr noise' \
+    '{"type":"assistant","message":{"content":[{"type":"text","text":"thinking aloud"}]}}' \
+    '{"type":"result","num_turns":7,"result":"done all"}' \
+    | LHTASK_TRACE_ROLE=implementer lhtask_stream_trace)"
+  printf '%s\n' "$TRACE_OUT" | grep -q "⚙ implementer → Edit: app/x.py" \
+    || { echo "  UNIT FAIL: tool_use not traced"; exit 1; }
+  printf '%s\n' "$TRACE_OUT" | grep -q "plain stderr noise" \
+    || { echo "  UNIT FAIL: non-JSON stderr line lost"; exit 1; }
+  printf '%s\n' "$TRACE_OUT" | grep -q "✔ implementer done — 7 turns" \
+    || { echo "  UNIT FAIL: result line missing"; exit 1; }
+  ! printf '%s\n' "$TRACE_OUT" | grep -q "thinking aloud" \
+    || { echo "  UNIT FAIL: text event must be dropped"; exit 1; }
+  LHTASK_STREAM="off"; lhtask_stream_setup
+  [ -z "$LHTASK_STREAM_ACTIVE" ] && [ "${#LHTASK_STREAM_FLAGS[@]}" -eq 0 ] \
+    || { echo "  UNIT FAIL: stream setup off still active"; exit 1; }
+  [ "$(printf 'raw passthrough\n' | lhtask_stream_trace)" = "raw passthrough" ] \
+    || { echo "  UNIT FAIL: inactive trace must pass through"; exit 1; }
+  LHTASK_STREAM="auto"
+  echo "  ok:  live stream trace (events rendered, noise kept, off=passthrough)"
   echo "  model-resolution unit tests passed"
 ) || { echo "SMOKE FAIL: model resolution unit tests"; exit 1; }
 
